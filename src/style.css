@@ -60,3 +60,22 @@ body.playing #game { cursor: none; }
   font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: var(--ink); background: rgba(10, 12, 16, 0.7);
   border: 1px solid rgba(255,255,255,0.18); cursor: pointer; }
 .leave:hover { background: rgba(40, 44, 52, 0.9); }
+
+.settings-btn { position: fixed; top: 14px; left: 16px; display: none; z-index: 5; padding: 8px 14px; border-radius: 999px; font: inherit;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: var(--ink); background: rgba(10, 12, 16, 0.7);
+  border: 1px solid rgba(255,255,255,0.18); cursor: pointer; }
+.settings-btn:hover { background: rgba(40, 44, 52, 0.9); }
+.leave { left: 112px; }
+.settings-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 6; width: min(460px, calc(100% - 32px));
+  background: rgba(10, 12, 16, 0.94); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 22px 24px; }
+.settings-panel h2 { margin: 0 0 14px; font-size: 18px; letter-spacing: 0.1em; }
+.settings-panel .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 0;
+  border-top: 1px solid rgba(255,255,255,0.08); }
+.settings-panel .label { font-weight: 700; font-size: 14px; }
+.settings-panel .label small { display: block; font-weight: 400; color: var(--quiet); font-size: 12px; margin-top: 3px; max-width: 220px; }
+.settings-panel .seg { display: flex; border: 1px solid rgba(255,255,255,0.16); border-radius: 10px; overflow: hidden; }
+.settings-panel .seg button { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 12px; color: var(--quiet); background: transparent;
+  border: 0; cursor: pointer; }
+.settings-panel .seg button.on { background: #ff8a3d; color: #1a1209; }
+.settings-panel .done { margin-top: 14px; width: 100%; padding: 11px; border-radius: 10px; font: inherit; font-weight: 700; color: var(--ink);
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); cursor: pointer; }

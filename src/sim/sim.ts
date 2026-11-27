@@ -175,14 +175,16 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
     p.sinceRollTicks = 0;
     p.rollCooldownTicks = secToTicks(cfg.rollCooldown, cfg);
   }
-  if (p.stance === 'normal' && wantsAds && !p.ads && p.sinceRollTicks <= secToTicks(cfg.kneelWindow, cfg)) {
+  // The kneel (and with it the empowered shot) needs the roll button still held.
+  const holdingRoll = !!c?.roll;
+  if (p.stance === 'normal' && wantsAds && holdingRoll && !p.ads && p.sinceRollTicks <= secToTicks(cfg.kneelWindow, cfg)) {
     p.stance = 'kneel';
     state.events.push({ type: 'kneel', player: p.id });
   }
 
-  // Kneel exit: letting go of ADS stands you up. Move input is ignored while
-  // kneeling, so a player still holding the stick after a roll stays planted.
-  if (p.stance === 'kneel' && !wantsAds) p.stance = 'normal';
+  // Kneel exit: letting go of focus or of the roll button stands you up. Move
+  // input is ignored while kneeling, so a player still holding the stick stays planted.
+  if (p.stance === 'kneel' && (!wantsAds || !holdingRoll)) p.stance = 'normal';
 
   // Sprint: needs movement, and ADS overrides it.
   if (p.stance === 'normal' && c?.sprint && moving && !wantsAds) p.stance = 'sprint';
@@ -222,10 +224,13 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   if (p.stance === 'roll') {
     const total = secToTicks(cfg.rollTime, cfg);
     const t = (total - p.rollTicks) / total; // 0..1 through the roll
-    // Full speed for the first two thirds, then ease out to rollEndSpeedFactor.
+    // Full speed for the first half, then a smooth ease down to rollEndSpeedFactor,
+    // which is close to walking speed so the roll hands its momentum to the run.
     const end = cfg.rollEndSpeedFactor;
-    const peak = cfg.rollDistance / (cfg.rollTime * (2 / 3 + (1 / 3) * (1 + end) / 2));
-    const f = t < 2 / 3 ? 1 : 1 - (1 - end) * ((t - 2 / 3) * 3);
+    const hold = 0.5;
+    const peak = cfg.rollDistance / (cfg.rollTime * (hold + (1 - hold) * (1 + end) / 2));
+    const u = t < hold ? 0 : (t - hold) / (1 - hold);
+    const f = 1 - (1 - end) * u * u * (3 - 2 * u);
     p.vx = p.rollDirX * peak * f;
     p.vz = p.rollDirZ * peak * f;
     p.rollTicks--;

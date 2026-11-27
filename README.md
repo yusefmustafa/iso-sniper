@@ -40,7 +40,8 @@ Keyboard + mouse and controllers both work; whichever you touched last drives yo
 - 3 HP each. A shot deals 1 HP. The empowered 2 HP shot only comes from rolling into focus (see kneel below); standing focus is accurate but never empowered.
 - Focused shots go exactly down the laser. Hip-fire spreads inside an 8 degree cone, drawn as the cone cursor.
 - One round in the chamber: 1.2 s bolt cycle after every shot (grey ring under you).
-- Sprinting lowers the gun. Rolling straight into focus drops you into a kneel: you stay planted, your hitbox shrinks and the empowered shot charges in 0.5 s (the scope glints when it's ready). Firing it kicks you back about 0.8 m and stands you up. Let go of focus to stand.
+- Sprinting lowers the gun. Rolling straight into focus while still holding roll drops you into a kneel: you stay planted, your hitbox shrinks and the empowered shot charges in 0.5 s (the scope glints when it's ready). Firing it kicks you back about 0.8 m and stands you up. Let go of focus or roll to stand.
+- Settings (top left while the mouse is free): the hip-fire cone can stop at the cursor or run on to the wall.
 - First to 3 rounds wins.
 
 All numbers live in `src/config.ts` and can be changed live from the tuning panel.

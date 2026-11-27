@@ -11,6 +11,7 @@ import { hashState } from './net/snapshot';
 import { connectOnline } from './net/webrtc';
 import { Sfx } from './render/audio';
 import { AimCursor } from './render/cursor';
+import { SettingsUi } from './settings';
 import { Hud, type LobbyView } from './render/hud';
 import { GameRenderer } from './render/scene';
 import { createGame, step } from './sim/sim';
@@ -23,6 +24,7 @@ const input = new InputManager(kbm);
 const hud = new Hud(document.querySelector<HTMLElement>('#hud')!);
 const sfx = new Sfx();
 const cursor = new AimCursor(document.querySelector('#hud')!);
+const settingsUi = new SettingsUi(document.body);
 // Live tuning is for practice only: online, both sims must run on identical numbers.
 const tuning = createTuningPanel(() => mode === 'online');
 let savedConfig: Config | null = null; // our own values, restored after an online match imports the host's
@@ -255,6 +257,7 @@ function frame(now: number) {
     cursor.draw(s, renderer.positions, sources, toScreen, renderer.screenToWorld, dt);
   }
   hud.setLeave(mode !== 'lobby' && !kbm.locked, leaveMatch);
+  settingsUi.setAvailable(mode === 'lobby' || !kbm.locked);
   updateNetHud();
   requestAnimationFrame(frame);
 }

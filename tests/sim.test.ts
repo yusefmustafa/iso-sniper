@@ -45,12 +45,12 @@ describe('shooting', () => {
   it('rolling into focus empowers the shot: 2 HP, and the shooter is kicked back out of the kneel', () => {
     const g = playing();
     run(g, 1, (g) => cmd({ moveZ: 1, roll: true, aim: aimAt(g, 0, 1) }));
-    run(g, T(config.rollTime) + 1, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    run(g, T(config.rollTime) + 1, (g) => cmd({ ads: true, roll: true, aim: aimAt(g, 0, 1) }));
     expect(g.players[0].stance).toBe('kneel');
-    const ev = run(g, T(config.kneelChargeTime) + 1, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    const ev = run(g, T(config.kneelChargeTime) + 1, (g) => cmd({ ads: true, roll: true, aim: aimAt(g, 0, 1) }));
     expect(ev.some((e) => e.type === 'charged')).toBe(true);
     const x0 = g.players[0].x;
-    run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }));
+    run(g, 1, (g) => cmd({ ads: true, roll: true, fire: true, aim: aimAt(g, 0, 1) }));
     expect(g.players[1].hp).toBe(1);
     expect(g.players[0].stance).toBe('normal');
     run(g, config.chargedHitstopFrames + T(config.knockbackTime) + 2, () => cmd({ aim: 0 }));
@@ -117,13 +117,27 @@ describe('movement', () => {
     expect(g.players[0].z - z0).toBeLessThan(config.rollDistance * 1.15);
   });
 
-  it('rolling straight into ADS kneels, and kneeling charges faster', () => {
+  it('rolling into focus with roll still held kneels and charges', () => {
+    const g = playing();
+    run(g, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
+    run(g, T(config.rollTime) + 1, () => cmd({ moveZ: 1, roll: true, ads: true, aim: 0 }));
+    expect(g.players[0].stance).toBe('kneel');
+    const ev = run(g, T(config.kneelChargeTime) + 1, () => cmd({ ads: true, roll: true, aim: 0 }));
+    expect(ev.some((e) => e.type === 'charged')).toBe(true);
+  });
+
+  it('no kneel if the roll button was released, and letting go of it mid-kneel stands you up', () => {
     const g = playing();
     run(g, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
     run(g, T(config.rollTime) + 1, () => cmd({ moveZ: 1, ads: true, aim: 0 }));
-    expect(g.players[0].stance).toBe('kneel');
-    const ev = run(g, T(config.kneelChargeTime) + 1, () => cmd({ ads: true, aim: 0 }));
-    expect(ev.some((e) => e.type === 'charged')).toBe(true);
+    expect(g.players[0].stance).not.toBe('kneel');
+
+    const h = playing();
+    run(h, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
+    run(h, T(config.rollTime) + 1, () => cmd({ roll: true, ads: true, aim: 0 }));
+    expect(h.players[0].stance).toBe('kneel');
+    run(h, 1, () => cmd({ ads: true, aim: 0 }));
+    expect(h.players[0].stance).toBe('normal');
   });
 });
 

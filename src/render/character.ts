@@ -10,14 +10,17 @@ import type { PlayerState } from '../sim/types';
  *
  * Local frame: +X is where the player aims, +Y up, +Z the character's right.
  *
- *   root (position, yaw) -> body (lean, crouch) -> pivot (roll flip, at the hips) -> model
+ *   root (position, yaw) -> body (lean, crouch) -> pivot (roll flip) -> model (legs, pelvis)
+ *                                                                      -> spine (curl) -> upper (torso, head, arms, rifle)
  */
 
 export const SHOULDER_HEIGHT = 1.38; // where the rifle sits; the aim plane uses this
 const HIP_Y = 0.92;
 const THIGH = 0.44;
 const SHIN = 0.42;
-const PIVOT_Y = 0.75;
+const PIVOT_Y = 0.95; // roll pivot: the middle of the tucked ball
+const WAIST_Y = 1.04; // the upper body curls forward around this
+const BALL_HEIGHT = 0.55; // pivot height above the floor at full tuck
 const UPPER_ARM = 0.29;
 const FOREARM = 0.29;
 const TAU = Math.PI * 2;
@@ -34,6 +37,8 @@ export class Character {
   private body = new THREE.Group();
   private pivot = new THREE.Group();
   private model = new THREE.Group();
+  private spine = new THREE.Group();
+  private upper = new THREE.Group();
   private gun = new THREE.Group();
   private legs: Leg[] = [];
   private arms: Arm[] = [];
@@ -44,15 +49,15 @@ export class Character {
   glintBurst = 0; // 0..1, flares when the empowered shot becomes ready
   private rollSpin = 0;
   private wasRolling = false;
-  private land = 0; // 0..1 landing crouch after a roll
   private tuck = 0; // 0..1 legs tucked (rolling)
+  private curl = 0; // radians the upper body curls forward (rolling)
+  private yawBlend = 0; // 0 = body faces the aim, 1 = body faces the roll direction
   private bob = 0;
   private lean = new THREE.Vector2();
   private kneel = 0;
   private gunDown = 0;
   private walk = 0;
   private stepDir = new THREE.Vector2(1, 0);
-  private rollAxis = new THREE.Vector2(1, 0); // roll direction in the local frame, kept after the roll for the settle
 
   constructor(private color: number, glintTexture: THREE.Texture) {
     const c = new THREE.Color(color);
@@ -70,6 +75,11 @@ export class Character {
     this.pivot.add(this.model);
     this.model.position.y = -PIVOT_Y;
     const m = this.model;
+    this.spine.position.y = WAIST_Y;
+    m.add(this.spine);
+    this.upper.position.y = -WAIST_Y;
+    this.spine.add(this.upper);
+    const u = this.upper; // upper-body parts use model coordinates too
 
     const add = (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0) => {
       const mesh = new THREE.Mesh(geo, mat);
@@ -84,13 +94,13 @@ export class Character {
     // ---- torso
     add(m, ellipsoid(0.17, 0.11, 0.2), shell, 0, HIP_Y + 0.02, 0); // pelvis
     add(m, new THREE.CylinderGeometry(0.1, 0.12, 0.2, 14), joint, 0, HIP_Y + 0.16, 0); // waist
-    add(m, ellipsoid(0.19, 0.25, 0.25), shell, 0, 1.3, 0); // chest
-    add(m, new THREE.BoxGeometry(0.06, 0.16, 0.24), accent, 0.17, 1.33, 0); // chest plate
-    add(m, ellipsoid(0.12, 0.08, 0.1), joint, -0.17, 1.3, 0); // back pack
-    add(m, new THREE.CylinderGeometry(0.05, 0.06, 0.1, 10), joint, 0, 1.55, 0); // neck
-    add(m, ellipsoid(0.14, 0.16, 0.13), shell, 0.01, 1.68, 0); // head
-    add(m, new THREE.BoxGeometry(0.05, 0.06, 0.2), accent, 0.13, 1.7, 0); // visor
-    for (const side of [-1, 1]) add(m, new THREE.SphereGeometry(0.085, 14, 10), shell, 0, SHOULDER_HEIGHT + 0.06, side * 0.25); // shoulder caps
+    add(u, ellipsoid(0.19, 0.25, 0.25), shell, 0, 1.3, 0); // chest
+    add(u, new THREE.BoxGeometry(0.06, 0.16, 0.24), accent, 0.17, 1.33, 0); // chest plate
+    add(u, ellipsoid(0.12, 0.08, 0.1), joint, -0.17, 1.3, 0); // back pack
+    add(u, new THREE.CylinderGeometry(0.05, 0.06, 0.1, 10), joint, 0, 1.55, 0); // neck
+    add(u, ellipsoid(0.14, 0.16, 0.13), shell, 0.01, 1.68, 0); // head
+    add(u, new THREE.BoxGeometry(0.05, 0.06, 0.2), accent, 0.13, 1.7, 0); // visor
+    for (const side of [-1, 1]) add(u, new THREE.SphereGeometry(0.085, 14, 10), shell, 0, SHOULDER_HEIGHT + 0.06, side * 0.25); // shoulder caps
 
     // ---- legs: hip -> knee -> ankle, each a pivot
     for (const side of [-1, 1]) {
@@ -133,7 +143,7 @@ export class Character {
     add(g, alongX(new THREE.CylinderGeometry(0.04, 0.04, 0.006, 14)), lens, 0.463, 0.085, 0);
     for (const x of [0.17, 0.32]) add(g, new THREE.BoxGeometry(0.025, 0.05, 0.04), metal, x, 0.05, 0);
     add(g, new THREE.BoxGeometry(0.12, 0.012, 0.05), accent, 0.56, -0.034, 0); // color strip under the handguard
-    m.add(g);
+    u.add(g);
 
     // Scope glint (shows when the empowered shot is ready)
     this.glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: glintTexture, color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -143,14 +153,14 @@ export class Character {
     g.add(this.glint);
 
     // ---- arms: solved each frame from shoulder to the hand holds on the rifle (two-bone IK)
-    const armSeg = (r: number) => add(m, new THREE.CylinderGeometry(r, r * 0.9, 1, 10), shell);
+    const armSeg = (r: number) => add(u, new THREE.CylinderGeometry(r, r * 0.9, 1, 10), shell);
     for (const side of [1, -1]) {
       this.arms.push({
         shoulder: new THREE.Vector3(0, SHOULDER_HEIGHT + 0.04, side * 0.25),
         upper: armSeg(0.055),
         fore: armSeg(0.048),
-        elbow: add(m, new THREE.SphereGeometry(0.055, 10, 8), joint),
-        hand: add(m, new THREE.SphereGeometry(0.05, 10, 8), joint),
+        elbow: add(u, new THREE.SphereGeometry(0.055, 10, 8), joint),
+        hand: add(u, new THREE.SphereGeometry(0.05, 10, 8), joint),
         // Right hand on the pistol grip, left hand under the handguard.
         grip: side === 1 ? new THREE.Vector3(0.13, -0.06, 0.0) : new THREE.Vector3(0.52, -0.04, 0),
         pole: side === 1 ? new THREE.Vector3(-0.3, -1, 0.8) : new THREE.Vector3(0.1, -1, -0.7),
@@ -161,61 +171,69 @@ export class Character {
   /** Called once per frame. */
   update(p: PlayerState, dt: number, frozen: boolean, time: number) {
     const k = (rate: number) => 1 - Math.exp(-rate * dt); // framerate-independent smoothing
-    this.root.rotation.y = -p.aim;
-
-    const speed = Math.hypot(p.vx, p.vz);
-    const fwdX = Math.cos(p.aim), fwdZ = Math.sin(p.aim);
-    // Velocity in the character's local frame.
-    const localFwd = (p.vx * fwdX + p.vz * fwdZ) / config.sprintSpeed;
-    const localSide = (-p.vx * fwdZ + p.vz * fwdX) / config.sprintSpeed;
     const rolling = p.stance === 'roll';
 
+    // ---- roll phase, 0..1, straight from the sim's roll timer so it lines up with the movement.
+    const total = secToTicks(config.rollTime);
+    const t = rolling ? Math.min(1, 1 - p.rollTicks / total) : 1;
+
+    // ---- facing: the body turns into the roll, then back to the aim as it comes up.
+    // (The aim itself keeps tracking the mouse the whole time; only the body turns.)
+    if (!frozen) this.yawBlend = rolling ? Math.min(1, this.yawBlend + dt / 0.05) : Math.max(0, this.yawBlend - dt / 0.18);
+    const rollYaw = Math.atan2(p.rollDirZ, p.rollDirX);
+    const yaw = p.aim + wrapAngle(rollYaw - p.aim) * smoothstep(this.yawBlend);
+    this.root.rotation.y = -yaw;
+
+    const speed = Math.hypot(p.vx, p.vz);
+    const fwdX = Math.cos(yaw), fwdZ = Math.sin(yaw);
+    // Velocity in the body's local frame.
+    const localFwd = (p.vx * fwdX + p.vz * fwdZ) / config.sprintSpeed;
+    const localSide = (-p.vx * fwdZ + p.vz * fwdX) / config.sprintSpeed;
+
+    // ---- roll shape. A ground roll, not a flip in the air:
+    //   dive (body pitches forward, knees come up) -> roll over the shoulders as a tight ball
+    //   -> come up with the legs already reaching into the run.
+    if (rolling) {
+      this.rollSpin = TAU * smoothstep(t / 0.86);
+      this.tuck = ramp(t, 0, 0.16) - ramp(t, 0.58, 0.94);
+      this.curl = 1.05 * (ramp(t, 0, 0.18) - ramp(t, 0.6, 0.92));
+    } else if (!frozen) {
+      // Normally already settled when the roll ends; this only smooths an early end (e.g. a rollback correction).
+      if (this.wasRolling) { this.rollSpin %= TAU; if (this.rollSpin > Math.PI) this.rollSpin -= TAU; }
+      this.rollSpin -= this.rollSpin * k(18);
+      this.tuck -= this.tuck * k(18);
+      this.curl -= this.curl * k(18);
+    }
+    this.wasRolling = rolling;
+    this.pivot.rotation.set(0, 0, -this.rollSpin);
+    this.pivot.scale.setScalar(1 - 0.1 * this.tuck);
+
+    const sprinting = p.stance === 'sprint';
     if (!frozen) {
-      this.lean.x += ((rolling ? 0 : localFwd * 0.28) - this.lean.x) * k(10);
+      this.lean.x += ((rolling ? 0 : localFwd * (sprinting ? 0.42 : 0.28)) - this.lean.x) * k(10);
       this.lean.y += ((rolling ? 0 : localSide * 0.28) - this.lean.y) * k(10);
-      this.bob += dt * (6 + speed * 1.6) * (speed > 0.3 ? 1 : 0);
+      this.bob += dt * (6 + Math.min(speed, config.sprintSpeed) * 1.6) * (speed > 0.3 ? 1 : 0);
       this.kneel += ((p.stance === 'kneel' ? 1 : 0) - this.kneel) * k(16);
-      this.gunDown += ((p.stance === 'sprint' || rolling || p.gunRaiseTicks > 0 ? 1 : 0) - this.gunDown) * k(rolling ? 18 : 10);
+      this.gunDown += ((sprinting || rolling || p.gunRaiseTicks > 0 ? 1 : 0) - this.gunDown) * k(rolling ? 24 : 12);
       this.recoil = Math.max(0, this.recoil - dt * 5);
-      this.tuck += ((rolling ? 1 : 0) - this.tuck) * k(rolling ? 22 : 9);
-      this.land = Math.max(0, this.land - dt / 0.28);
       this.glintBurst = Math.max(0, this.glintBurst - dt / 0.35);
-      const moving = speed > 0.3 && !rolling;
-      this.walk += ((moving ? Math.min(1, speed / config.walkSpeed) : 0) - this.walk) * k(8);
-      if (moving) {
+      // The stride keeps running through the roll (hidden by the tuck), so the legs come out of it mid-step.
+      const moving = speed > 0.3;
+      this.walk += ((moving ? Math.min(1, speed / config.walkSpeed) : 0) - this.walk) * k(rolling ? 30 : 8);
+      if (rolling) {
+        this.stepDir.set(1, 0); // rolling straight ahead in the body frame
+      } else if (moving) {
         const n = Math.hypot(localFwd, localSide) || 1;
         this.stepDir.x += (localFwd / n - this.stepDir.x) * k(12);
         this.stepDir.y += (localSide / n - this.stepDir.y) * k(12);
       }
     }
 
-    // ---- roll flip around the hips, along the roll direction.
-    if (rolling) {
-      const total = secToTicks(config.rollTime);
-      this.rollSpin = (1 - p.rollTicks / total) * TAU;
-      // Aim can turn mid-roll, so the axis is recomputed in the current local frame.
-      this.rollAxis.set(p.rollDirX * fwdX + p.rollDirZ * fwdZ, -p.rollDirX * fwdZ + p.rollDirZ * fwdX);
-    } else {
-      if (this.wasRolling) {
-        // The flip ends a full turn round: settle to the nearest upright angle, not back through the turn.
-        this.rollSpin %= TAU;
-        if (this.rollSpin > Math.PI) this.rollSpin -= TAU;
-        this.land = 1;
-      }
-      this.rollSpin += (0 - this.rollSpin) * k(14);
-    }
-    this.wasRolling = rolling;
-    this.pivot.rotation.set(this.rollSpin * this.rollAxis.y, 0, -this.rollSpin * this.rollAxis.x);
-    // Tucked into a ball while rolling, lifted so the head clears the floor when upside down.
-    this.pivot.position.y = PIVOT_Y;
-    this.pivot.scale.setScalar(1 - 0.22 * this.tuck);
-
-    // ---- body: lean into movement, crouch on landing and kneel, step bob.
-    const landEase = this.land * this.land * (3 - 2 * this.land); // smoothstep: soft in, soft out
-    const crouch = this.kneel * THIGH + landEase * 0.14 - this.tuck * 0.18;
-    const bobY = Math.abs(Math.sin(this.bob)) * 0.05 * this.walk;
-    this.body.position.y = bobY - crouch;
-    this.body.rotation.set(this.lean.y, 0, -this.lean.x - landEase * 0.12);
+    // ---- body: lean, kneel crouch, step bob, and lowered to the floor while tucked.
+    const bobY = Math.abs(Math.sin(this.bob)) * 0.05 * this.walk * (1 - this.tuck);
+    this.body.position.y = bobY - this.kneel * THIGH - (PIVOT_Y - BALL_HEIGHT) * this.tuck;
+    this.body.rotation.set(this.lean.y, 0, -this.lean.x);
+    this.spine.rotation.z = -this.curl - (sprinting ? 0.08 : 0);
 
     // ---- legs
     const walkAmt = this.walk * (1 - this.kneel) * (1 - this.tuck);
@@ -224,9 +242,9 @@ export class Character {
       const swing = Math.sin(this.bob) * sign * 0.6 * walkAmt;
       const liftPhase = Math.max(0, Math.cos(this.bob) * sign);
       const dir = this.stepDir;
-      // Pose terms (forward pitch = +rotation.z on the hip, knees bend with -rotation.z).
-      let hipPitch = 0.45 * this.tuck * 2.6 + landEase * 0.55;
-      let kneeBend = -2.1 * this.tuck - landEase * 1.0 - liftPhase * 0.9 * walkAmt;
+      // Forward pitch = +rotation.z on the hip; knees bend with -rotation.z.
+      let hipPitch = 1.9 * this.tuck;
+      let kneeBend = -2.2 * this.tuck - liftPhase * 0.9 * walkAmt;
       // Kneel: left foot planted in front, right knee on the ground.
       if (i === 0) { hipPitch += 1.45 * this.kneel; kneeBend += -1.45 * this.kneel; }
       else { hipPitch += -0.05 * this.kneel; kneeBend += -1.5 * this.kneel; }
@@ -235,10 +253,11 @@ export class Character {
       leg.ankle.rotation.z = -(hipPitch + kneeBend + swing * dir.x) * 0.85; // keep the boot roughly flat
     });
 
-    // ---- rifle: lowered when sprinting or rolling, kicked back on recoil.
+    // ---- rifle: lowered when sprinting, hugged to the chest in a roll, kicked back on recoil.
     const kick = Math.min(1.6, this.recoil);
-    this.gun.rotation.z = -this.gunDown * 0.85 + kick * 0.22;
-    this.gun.position.x = 0.02 - kick * 0.1;
+    // In the tuck the rifle swings across the chest so it rolls with the body instead of poking out.
+    this.gun.rotation.set(0, -1.25 * this.tuck, -this.gunDown * 0.85 + this.tuck * 0.35 + kick * 0.22);
+    this.gun.position.x = 0.02 - kick * 0.1 - this.tuck * 0.12;
     this.gun.position.y = SHOULDER_HEIGHT + (p.ads ? 0.02 : 0);
     this.gun.updateMatrix();
     for (const arm of this.arms) this.solveArm(arm);
@@ -323,3 +342,8 @@ export function makeGlintTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
+
+const smoothstep = (x: number) => { const u = Math.min(1, Math.max(0, x)); return u * u * (3 - 2 * u); };
+/** 0 before a, 1 after b, smooth in between. */
+const ramp = (t: number, a: number, b: number) => smoothstep((t - a) / (b - a));
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));

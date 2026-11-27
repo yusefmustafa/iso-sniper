@@ -1,4 +1,6 @@
 import { config } from '../config';
+import { settings } from '../settings';
+import { rayToWorld } from '../sim/arena';
 import { chargeProgress, gunUp, isCharged } from '../sim/sim';
 import type { GameState } from '../sim/types';
 import { AIM_HEIGHT, PLAYER_COLORS } from './scene';
@@ -73,21 +75,24 @@ export class AimCursor {
       const alpha = ready ? 1 : 0.35;
       const half = (config.hipSpreadDeg / 2) * DEG * open;
       const start = 0.7; // start the cone just past the muzzle
+      // Settings: end the cone at the cursor, or run it on to the wall the shot would reach.
+      const full = settings.coneLength === 'full';
+      const coneEnd = full ? Math.max(MIN_REACH, rayToWorld(state.arena, pos.x, pos.z, Math.cos(p.aim), Math.sin(p.aim), config.shotRange)) : reach;
 
-      // Cone: two edges and an arc at the cursor's distance.
+      // Cone: two edges and an arc at its far end.
       if (open > 0.02) {
         const steps = 12;
         g.beginPath();
         const a = at(p.aim - half, start);
         g.moveTo(a.x, a.y);
         for (let s = 0; s <= steps; s++) {
-          const q = at(p.aim - half + (2 * half * s) / steps, reach);
+          const q = at(p.aim - half + (2 * half * s) / steps, coneEnd);
           g.lineTo(q.x, q.y);
         }
         const b = at(p.aim + half, start);
         g.lineTo(b.x, b.y);
         g.closePath();
-        g.globalAlpha = 0.12 * alpha * open;
+        g.globalAlpha = (full ? 0.08 : 0.12) * alpha * open;
         g.fillStyle = color;
         g.fill();
         g.globalAlpha = 0.75 * alpha * Math.max(0.3, open);

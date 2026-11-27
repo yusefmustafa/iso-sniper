@@ -24,11 +24,11 @@ export const config = {
   kneelRadius: 0.3,
 
   // Roll
-  rollDistance: 6,
-  rollTime: 0.4,
+  rollDistance: 5,
+  rollTime: 0.45,
   rollCooldown: 1.0,
-  rollEndSpeedFactor: 0.3, // speed at the very end of the roll, relative to peak
-  kneelWindow: 0.25, // ADS within this long after a roll ends = kneel
+  rollEndSpeedFactor: 0.4, // speed at the very end of the roll, relative to peak (about walking speed)
+  kneelWindow: 0.25, // focus within this long after a roll ends, roll still held = kneel
 
   // Shooting
   hipSpreadDeg: 8, // full cone width (the cone cursor shows it)
