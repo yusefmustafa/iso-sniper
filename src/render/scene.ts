@@ -4,6 +4,7 @@ import { rayToCircle, rayToWorld } from '../sim/arena';
 import { chargeProgress, hitRadius, isCharged, secToTicks } from '../sim/sim';
 import type { GameState, PlayerState, SimEvent } from '../sim/types';
 import { Character, makeGlintTexture, SHOULDER_HEIGHT } from './character';
+import { DeathFx } from './death';
 
 /**
  * The renderer only reads game state and sim events. It never changes the
@@ -19,6 +20,8 @@ interface PlayerView {
   laserOuter: THREE.Mesh;
   laserCore: THREE.Mesh;
   ring: THREE.Mesh;
+  alive: boolean; // last frame's state, to catch the moment of death
+  hitDir: { x: number; z: number }; // direction of the last shot that hit, to throw the debris
 }
 
 const MUZZLE_REACH = 1.68; // muzzle distance in front of the character, for the laser
@@ -45,6 +48,7 @@ export class GameRenderer {
   private aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -AIM_HEIGHT);
   private time = 0;
   private glintTexture: THREE.Texture | null = null;
+  private deaths = new DeathFx(this.scene);
   /** Interpolated player positions from the last render, for overlays. */
   positions: { x: number; z: number }[] = [];
   private arenaBuilt = false;
@@ -200,7 +204,7 @@ export class GameRenderer {
     root.add(glow);
 
     this.scene.add(root);
-    return { char, laserOuter, laserCore, ring };
+    return { char, laserOuter, laserCore, ring, alive: true, hitDir: { x: 1, z: 0 } };
   }
 
   /** React to sim events with one-off effects. */
@@ -216,11 +220,13 @@ export class GameRenderer {
         this.spawnSparks(e.toX, e.toZ, e.blocked ? 0xffffff : e.hit !== null ? PLAYER_COLORS[e.hit] : 0xffe2b0, e.hit !== null ? 14 : 8);
       } else if (e.type === 'hit') {
         this.views[e.player].char.flash = 0.12;
+        this.views[e.player].hitDir = { x: e.dirX, z: e.dirZ };
         this.addTrauma(e.damage > 1 ? 0.8 : 0.5);
       } else if (e.type === 'charged') {
         this.views[e.player].char.glintBurst = 1;
       } else if (e.type === 'roundStart') {
         this.camVel.set(0, 0, 0);
+        this.deaths.clear();
       }
     }
     void state;
@@ -273,11 +279,17 @@ export class GameRenderer {
 
   private updatePlayerView(state: GameState, p: PlayerState, v: PlayerView, pos: { x: number; z: number }, dt: number, frozen: boolean) {
     v.char.root.position.set(pos.x, 0, pos.z);
+    // Death: the body is replaced by the explosion until the next round. Driven by hp (not the
+    // event), so a rollback correction can't leave a stale body or a double explosion behind.
+    const alive = p.hp > 0;
+    if (v.alive && !alive) this.deaths.spawn(pos.x, pos.z, PLAYER_COLORS[p.id], v.hitDir.x, v.hitDir.z);
+    v.alive = alive;
+    v.char.root.visible = alive;
     v.char.update(p, dt, frozen, this.time);
     const fwdX = Math.cos(p.aim), fwdZ = Math.sin(p.aim);
 
     // Laser: from the muzzle to the first wall or player along the aim.
-    const showLaser = p.ads && state.phase !== 'countdown';
+    const showLaser = alive && p.ads && state.phase !== 'countdown';
     v.laserOuter.visible = v.laserCore.visible = showLaser;
     if (showLaser) {
       // The rifle sits on the right shoulder, so the laser starts a little right of center.
@@ -311,7 +323,7 @@ export class GameRenderer {
       ringMat.color.setHex(isCharged(p) ? 0xffffff : PLAYER_COLORS[p.id]);
     }
     v.ring.geometry = this.ringGeoms[Math.round(frac * 32)];
-    v.ring.visible = frac > 0;
+    v.ring.visible = alive && frac > 0;
   }
 
   private updateCamera(state: GameState, pos: { x: number; z: number }[], dt: number) {
@@ -362,6 +374,7 @@ export class GameRenderer {
   }
 
   private updateEffects(dt: number) {
+    this.deaths.update(dt);
     this.muzzleLight.intensity = Math.max(0, this.muzzleLight.intensity - dt * 300);
     this.tracers = this.tracers.filter((t) => {
       t.life -= dt;
