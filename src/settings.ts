@@ -20,8 +20,8 @@ export interface Settings {
   dummyFires: 'off' | 'on';
 }
 
-const KEY = 'iso-sniper:settings:v3'; // bumped when a default changes (v2 full cone, v3 low-ready sprint)
-const defaults: Settings = { coneLength: 'full', coneWalls: 'stop', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move', dummyFires: 'off' };
+const KEY = 'iso-sniper:settings:v4'; // bumped when a default changes (v2 full cone, v3 low-ready sprint, v4 cut cone)
+const defaults: Settings = { coneLength: 'full', coneWalls: 'cut', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move', dummyFires: 'off' };
 
 function load(): Settings {
   try {
