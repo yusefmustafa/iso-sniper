@@ -81,7 +81,7 @@ export function loopbackPair(opts: { latencyMs: number; jitterMs?: number; loss?
 
 /** Two browser tabs on the same machine, joined by room name. Dev and automated tests only. */
 export function broadcastChannel(room: string, onOpen: (ch: Channel) => void): () => void {
-  const bc = new BroadcastChannel(`iso-sniper:${room}`);
+  const bc = new BroadcastChannel(`snipefight:${room}`);
   const me = Math.random().toString(36).slice(2);
   let peer: string | null = null;
   const handlers: ((m: NetMessage) => void)[] = [];

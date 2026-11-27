@@ -62,7 +62,7 @@ export class Hud {
     } else {
       body = `<p class="status"><span class="wait">${view.status}</span></p>${btn('cancel', 'Back')}`;
     }
-    this.join.innerHTML = `<h1>ISO SNIPERS</h1><p class="tag">Online 1v1 sniper duels</p>${body}`;
+    this.join.innerHTML = `<h1>SNIPEFIGHT</h1><p class="tag">Online 1v1 sniper duels</p>${body}`;
     this.join.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => view.on(b.dataset.id!)));
     this.join.querySelector<HTMLInputElement>('input')?.addEventListener('focus', (e) => (e.target as HTMLInputElement).select());
   }
