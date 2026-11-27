@@ -64,7 +64,7 @@ function onLobby(id: string) {
   if (id === 'create') {
     const room = newRoomId();
     history.replaceState(null, '', `#${room}`);
-    sessionStorage.setItem('iso-sniper:created', room);
+    sessionStorage.setItem('snipefight:created', room);
     goOnline(room, true);
   } else if (id === 'practice') {
     startPractice();
@@ -270,7 +270,7 @@ function frame(now: number) {
 
 // Opening a match link joins it directly.
 const linkedRoom = roomFromHash();
-if (linkedRoom) goOnline(linkedRoom, sessionStorage.getItem('iso-sniper:created') === linkedRoom);
+if (linkedRoom) goOnline(linkedRoom, sessionStorage.getItem('snipefight:created') === linkedRoom);
 window.addEventListener('hashchange', () => {
   const room = roomFromHash();
   if (room && mode === 'lobby' && !channel) goOnline(room, false);

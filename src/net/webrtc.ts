@@ -11,7 +11,7 @@ import type { Channel, NetMessage } from './channel';
  * packet never holds up the ones behind it (rollback inputs are redundant).
  */
 
-const APP_ID = 'iso-sniper.v1';
+const APP_ID = 'snipefight.v1';
 const FAST_CHANNEL_ID = 7;
 
 export type OnlineStatus = 'searching' | 'connected' | 'full' | 'failed';

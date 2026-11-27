@@ -20,12 +20,13 @@ export interface Settings {
   dummyFires: 'off' | 'on';
 }
 
-const KEY = 'iso-sniper:settings:v4'; // bumped when a default changes (v2 full cone, v3 low-ready sprint, v4 cut cone)
+const KEY = 'snipefight:settings:v4'; // bumped when a default changes (v2 full cone, v3 low-ready sprint, v4 cut cone)
+const OLD_KEY = 'iso-sniper:settings:v4'; // key from before the rename, read so saved settings carry over
 const defaults: Settings = { coneLength: 'full', coneWalls: 'cut', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move', dummyFires: 'off' };
 
 function load(): Settings {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY) ?? localStorage.getItem(OLD_KEY);
     if (raw) return { ...defaults, ...JSON.parse(raw) };
   } catch { /* storage unavailable: use defaults */ }
   return { ...defaults };

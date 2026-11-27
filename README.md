@@ -1,4 +1,4 @@
-# Iso Snipers
+# Snipefight
 
 An isometric 1v1 sniper duel, played online in the browser. Create a match, send the link, your friend clicks it and you duel.
 
@@ -15,8 +15,7 @@ To try online play on one machine, open two tabs at `http://localhost:5173/?net=
 (BroadcastChannel instead of WebRTC). Real WebRTC between two isolated browsers:
 `npm run relay` (local signaling relay) and `npm run smoke:online` with the dev server running.
 
-Pushing to `main` deploys to GitHub Pages (`.github/workflows/pages.yml`). Turn it on once
-under the repo's Settings > Pages > Source: GitHub Actions.
+Live at https://snipefight.com. Pushing to `main` deploys it to GitHub Pages (`.github/workflows/pages.yml`).
 
 ## Controls
 
