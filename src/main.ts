@@ -4,6 +4,7 @@ import { createTuningPanel } from './dev/tuning';
 import { KeyboardMouse } from './input/keyboardMouse';
 import { InputManager } from './input/manager';
 import { Sfx } from './render/audio';
+import { AimCursor } from './render/cursor';
 import { Hud } from './render/hud';
 import { GameRenderer } from './render/scene';
 import { createGame, restartMatch, step } from './sim/sim';
@@ -11,9 +12,11 @@ import type { GameState, SimEvent } from './sim/types';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const renderer = new GameRenderer(canvas);
-const input = new InputManager(new KeyboardMouse(canvas, renderer.screenToWorld));
+const kbm = new KeyboardMouse(canvas, renderer.screenToWorld);
+const input = new InputManager(kbm);
 const hud = new Hud(document.querySelector<HTMLElement>('#hud')!);
 const sfx = new Sfx();
+const cursor = new AimCursor(document.querySelector('#hud')!);
 createTuningPanel();
 
 for (const ev of ['keydown', 'mousedown', 'touchstart'] as const) window.addEventListener(ev, () => sfx.unlock());
@@ -30,6 +33,8 @@ function start(dummy: boolean) {
   prev = state.players.map((p) => ({ x: p.x, z: p.z }));
   labels = ['P1', dummy ? 'DUMMY' : 'P2'];
   mode = 'game';
+  kbm.lockEnabled = true;
+  document.body.classList.add('playing');
   hud.hideJoin();
   handleEvents(state.events);
 }
@@ -77,7 +82,12 @@ function frame(now: number) {
   if (steps === 5) acc = 0;
 
   renderer.render(state, prev, Math.min(1, acc / TICK), dt, state.hitstop > 0);
-  if (mode === 'game') hud.update(state, (x, y, z) => renderer.worldToScreen(x, y, z), labels);
+  if (mode === 'game') {
+    const toScreen = (x: number, y: number, z: number) => renderer.worldToScreen(x, y, z);
+    hud.update(state, toScreen, labels);
+    const sources = input.slots.map((d) => (d ? { mouse: d === kbm ? kbm.cursor : null } : null));
+    cursor.draw(state, renderer.positions, sources, toScreen, renderer.screenToWorld, dt);
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

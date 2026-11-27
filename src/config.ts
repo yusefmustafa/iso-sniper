@@ -31,7 +31,7 @@ export const config = {
   kneelWindow: 0.25, // ADS within this long after a roll ends = kneel
 
   // Shooting
-  hipSpreadDeg: 14, // full cone width
+  hipSpreadDeg: 8, // full cone width (the cone cursor shows it)
   boltTime: 1.2,
   chargeTime: 0.75,
   kneelChargeTime: 0.5,

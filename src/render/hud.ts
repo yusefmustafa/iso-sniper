@@ -26,7 +26,7 @@ export class Hud {
       this.pips.push(p);
     }
     el('div', 'help', this.root).innerHTML =
-      'WASD move · Mouse aim · RMB focus · LMB shoot · Shift sprint · Space roll &nbsp;|&nbsp; Pad: LS move · RS aim · LT focus · RT shoot · LB sprint · A roll &nbsp;|&nbsp; ` tuning';
+      'WASD move · Mouse aim · RMB focus · LMB shoot · Shift sprint · Space roll · F fullscreen · Esc free mouse &nbsp;|&nbsp; Pad: LS move · RS aim · LT focus · RT shoot · LB sprint · A roll &nbsp;|&nbsp; ` tuning';
   }
 
   showJoin(slots: (string | null)[]) {

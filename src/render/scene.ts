@@ -10,7 +10,7 @@ import type { GameState, PlayerState, SimEvent } from '../sim/types';
  */
 
 export const PLAYER_COLORS = [0xff8a3d, 0x3dd6ff];
-const AIM_HEIGHT = 1.15;
+export const AIM_HEIGHT = 1.15;
 const CAM_OFFSET = new THREE.Vector3(20, 24, 20);
 
 interface PlayerView {
@@ -19,6 +19,7 @@ interface PlayerView {
   torso: THREE.Mesh;
   head: THREE.Mesh;
   gun: THREE.Group;
+  legs: THREE.Group[]; // [left, right], pivoting at the hip
   materials: THREE.MeshStandardMaterial[];
   laserOuter: THREE.Mesh;
   laserCore: THREE.Mesh;
@@ -30,7 +31,11 @@ interface PlayerView {
   lean: THREE.Vector2;
   kneel: number; // 0..1 smoothed
   gunDown: number; // 0..1 smoothed
+  walk: number; // 0..1 smoothed stride amount
+  stepDir: THREE.Vector2; // smoothed move direction in the character's frame
 }
+
+const HIP_HEIGHT = 0.42;
 
 interface Tracer { mesh: THREE.Mesh; life: number; max: number }
 interface Spark { mesh: THREE.Mesh; vel: THREE.Vector3; life: number }
@@ -52,6 +57,8 @@ export class GameRenderer {
   private raycaster = new THREE.Raycaster();
   private aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -AIM_HEIGHT);
   private time = 0;
+  /** Interpolated player positions from the last render, for overlays. */
+  positions: { x: number; z: number }[] = [];
   private arenaBuilt = false;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -190,8 +197,8 @@ export class GameRenderer {
     const body = new THREE.Group();
     root.add(body);
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.7, 6, 16), bodyMat);
-    torso.position.y = 0.75;
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.5, 6, 16), bodyMat);
+    torso.position.y = 0.85;
     torso.castShadow = true;
     body.add(torso);
 
@@ -199,6 +206,21 @@ export class GameRenderer {
     head.position.y = 1.5;
     head.castShadow = true;
     body.add(head);
+
+    // Legs and boots. Each leg pivots at the hip so walking can swing it.
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.7, metalness: 0.1 });
+    const legs: THREE.Group[] = [];
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Group();
+      leg.position.set(0, HIP_HEIGHT, side * 0.16);
+      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.09, HIP_HEIGHT - 0.06, 10), legMat);
+      thigh.position.y = -(HIP_HEIGHT - 0.06) / 2;
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.11, 0.17), accentMat);
+      boot.position.set(0.06, -HIP_HEIGHT + 0.055, 0);
+      for (const m of [thigh, boot]) { m.castShadow = true; leg.add(m); }
+      body.add(leg);
+      legs.push(leg);
+    }
 
     // Visor shows facing at a glance
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.34), accentMat);
@@ -243,8 +265,9 @@ export class GameRenderer {
 
     this.scene.add(root);
     return {
-      root, body, torso, head, gun, materials: [bodyMat, accentMat], laserOuter, laserCore, ring,
+      root, body, torso, head, gun, legs, materials: [bodyMat, accentMat], laserOuter, laserCore, ring,
       flash: 0, recoil: 0, rollSpin: 0, bob: 0, lean: new THREE.Vector2(), kneel: 0, gunDown: 0,
+      walk: 0, stepDir: new THREE.Vector2(1, 0),
     };
   }
 
@@ -302,7 +325,7 @@ export class GameRenderer {
     while (this.views.length < state.players.length) this.views.push(this.buildPlayer(this.views.length));
     this.time += dt;
 
-    const positions = state.players.map((p, i) => ({
+    const positions = this.positions = state.players.map((p, i) => ({
       x: prev[i] ? prev[i].x + (p.x - prev[i].x) * alpha : p.x,
       z: prev[i] ? prev[i].z + (p.z - prev[i].z) * alpha : p.z,
     }));
@@ -331,7 +354,26 @@ export class GameRenderer {
       v.kneel += ((p.stance === 'kneel' ? 1 : 0) - v.kneel) * k(22);
       v.gunDown += ((p.stance === 'sprint' || p.stance === 'roll' || p.gunRaiseTicks > 0 ? 1 : 0) - v.gunDown) * k(18);
       v.recoil = Math.max(0, v.recoil - dt * 6);
+      const moving = speed > 0.3 && p.stance !== 'roll';
+      v.walk += ((moving ? Math.min(1, speed / config.walkSpeed) : 0) - v.walk) * k(12);
+      if (moving) {
+        const n = Math.hypot(localFwd, localSide) || 1;
+        v.stepDir.x += (localFwd / n - v.stepDir.x) * k(16);
+        v.stepDir.y += (localSide / n - v.stepDir.y) * k(16);
+      }
     }
+
+    // Legs: swing along the move direction, opposite each other, lifting on the forward swing.
+    // Kneeling plants one knee forward.
+    v.legs.forEach((leg, side) => {
+      const sign = side === 0 ? 1 : -1;
+      const phase = Math.sin(v.bob) * sign;
+      const lift = Math.max(0, Math.cos(v.bob) * sign);
+      const swing = phase * 0.55 * v.walk + (side === 0 ? 0.7 : -0.25) * v.kneel;
+      const dir = v.kneel > 0.5 ? { x: 1, y: 0 } : v.stepDir;
+      leg.rotation.set(-swing * dir.y, 0, swing * dir.x);
+      leg.position.y = HIP_HEIGHT + lift * 0.06 * v.walk;
+    });
 
     // Roll: a full forward flip around the roll direction, with a squash at the start.
     if (p.stance === 'roll') {

@@ -52,7 +52,7 @@ export const isCharged = (p: PlayerState, cfg: Config = defaultConfig) =>
   p.ads && p.adsTicks >= chargeTicksFor(p, cfg);
 
 /** Can this player's gun fire or aim right now (ignoring the bolt)? */
-const gunUp = (p: PlayerState) => p.stance !== 'roll' && p.stance !== 'sprint' && p.gunRaiseTicks === 0;
+export const gunUp = (p: PlayerState) => p.stance !== 'roll' && p.stance !== 'sprint' && p.gunRaiseTicks === 0;
 
 /** Advance the game by one tick. Mutates state; read state.events afterwards for effects. */
 export function step(state: GameState, commands: Command[], cfg: Config = defaultConfig): void {

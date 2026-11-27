@@ -22,6 +22,8 @@ npm run build    # static build in dist/, host anywhere
 | Sprint | Hold Shift | Hold LB / L1 (or click L3) |
 | Roll | Space | A / Cross |
 | Rematch / practice vs dummy | Enter | Start |
+| Fullscreen | F | |
+| Free the mouse (it is captured while you play) | Esc | |
 | Tuning panel | ` | |
 
 Press any button on a device to join. With one player joined, press Enter or Start to practice against a dummy.
@@ -29,7 +31,7 @@ Press any button on a device to join. With one player joined, press Enter or Sta
 ## Rules (first playable)
 
 - 3 HP each. A shot deals 1 HP; hold focus for 0.75 s and the next shot deals 2 HP.
-- Focused shots go exactly down the laser. Hip-fire spreads inside a 14 degree cone.
+- Focused shots go exactly down the laser. Hip-fire spreads inside an 8 degree cone, drawn as the cone cursor.
 - One round in the chamber: 1.2 s bolt cycle after every shot (grey ring under you).
 - Sprinting lowers the gun. Rolling straight into focus drops you into a kneel: you stay planted, your hitbox shrinks and the charge takes 0.5 s. Let go of focus to stand.
 - First to 3 rounds wins.
