@@ -188,6 +188,32 @@ describe('rounds', () => {
     expect(o.hp).toBe(2);
   });
 
+  it('a hit cancels a kneeling empowered charge, blocks shooting during the stun, and focus needs a fresh press', () => {
+    const g = playing();
+    // P2 rolls into a kneel and charges the empowered shot.
+    run(g, 1, () => cmd({ aim: 0 }), () => cmd({ moveZ: 1, roll: true, aim: Math.PI }));
+    run(g, T(config.rollTime) + 1, () => cmd({ aim: 0 }), () => cmd({ roll: true, ads: true, aim: Math.PI }));
+    run(g, T(config.kneelChargeTime) + 1, () => cmd({ aim: 0 }), () => cmd({ roll: true, ads: true, aim: Math.PI }));
+    const o = g.players[1];
+    expect(o.stance).toBe('kneel');
+    expect(o.adsTicks).toBeGreaterThanOrEqual(T(config.kneelChargeTime));
+    // P1 hits P2 down the laser.
+    run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }), () => cmd({ roll: true, ads: true, aim: Math.PI }));
+    expect(o.hp).toBe(2);
+    expect(o.ads).toBe(false);
+    expect(o.adsTicks).toBe(0);
+    expect(o.stance).toBe('normal');
+    // Pressing fire during the stun does nothing.
+    const evStun = run(g, config.hitstopFrames + T(config.hitStunTime) - 2, () => cmd({ aim: 0 }), (g) => cmd({ ads: true, fire: g.tick % 2 === 0, aim: Math.PI }));
+    expect(evStun.some((e) => e.type === 'shot' && e.player === 1)).toBe(false);
+    // Still holding focus after the stun: stays off until released and pressed again.
+    run(g, 3, () => cmd({ aim: 0 }), () => cmd({ ads: true, aim: Math.PI }));
+    expect(o.ads).toBe(false);
+    run(g, 1, () => cmd({ aim: 0 }), () => cmd({ aim: Math.PI }));
+    run(g, 1, () => cmd({ aim: 0 }), () => cmd({ ads: true, aim: Math.PI }));
+    expect(o.ads).toBe(true);
+  });
+
   it('the practice dummy follows commands when given some', () => {
     const g = createGame({ seed: 3, dummyP2: true });
     g.arena.boxes = [];

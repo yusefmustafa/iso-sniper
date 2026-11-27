@@ -47,7 +47,8 @@ export interface PlayerState {
   knockZ: number;
   knockTicks: number;
   stunTicks: number; // >0 right after being hit: no move, shoot or roll input
-  invulnTicks: number; // >0 after being hit: shots can't damage you (you can still shoot) // fractional during slow motion
+  invulnTicks: number;
+  adsLock: boolean; // set by a hit: focus stays off until the focus button is released and pressed again // >0 after being hit: shots can't damage you (you can still shoot) // fractional during slow motion
   sprintRamp: number; // 0..1
   prevFire: boolean;
   prevRoll: boolean;

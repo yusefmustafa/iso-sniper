@@ -21,7 +21,7 @@ function newPlayer(id: number, state: GameState, dummy: boolean, cfg: Config): P
     id, x: s.x, z: s.z, vx: 0, vz: 0, aim: s.aim, hp: cfg.maxHp,
     stance: 'normal', ads: false, adsTicks: 0, boltTicks: 0, gunRaiseTicks: 0,
     rollTicks: 0, rollDirX: 0, rollDirZ: 0, rollCooldownTicks: 0, sinceRollTicks: 9999,
-    fireBuffer: 0, rollBuffer: 0, knockX: 0, knockZ: 0, knockTicks: 0, stunTicks: 0, invulnTicks: 0, sprintRamp: 0,
+    fireBuffer: 0, rollBuffer: 0, knockX: 0, knockZ: 0, knockTicks: 0, stunTicks: 0, invulnTicks: 0, adsLock: false, sprintRamp: 0,
     prevFire: false, prevRoll: false, dummy,
   };
 }
@@ -141,6 +141,9 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   if (p.stance !== 'roll') p.sinceRollTicks++;
   if (p.invulnTicks > 0) p.invulnTicks--;
 
+  // A hit cancels focus until the button is let go (checked on the raw input, before the stun hides it).
+  if (!c?.ads) p.adsLock = false;
+
   // Hit stun: input is ignored for a moment (aim still follows the cursor). Held buttons are
   // tracked so nothing fires the instant the stun ends, and buffered presses are dropped.
   if (p.stunTicks > 0) {
@@ -210,7 +213,7 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
     : 0;
 
   // ADS and charge
-  const canAds = wantsAds && gunUp(p);
+  const canAds = wantsAds && !p.adsLock && gunUp(p);
   if (canAds) {
     if (!p.ads) { p.ads = true; p.adsTicks = 0; }
     const wasCharged = isCharged(p, cfg);
@@ -349,7 +352,8 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
     o.stunTicks = secToTicks(cfg.hitStunTime, cfg);
     o.invulnTicks = secToTicks(cfg.invulnTime, cfg);
     // Getting shot breaks your aim.
-    o.ads = false; o.adsTicks = 0;
+    // Getting hit cancels focus and any charge (empowered shot included); focus needs a fresh press.
+    o.ads = false; o.adsTicks = 0; o.adsLock = true;
     if (o.stance === 'kneel') o.stance = 'normal';
     state.hitstop = charged ? cfg.chargedHitstopFrames : cfg.hitstopFrames;
     state.events.push({ type: 'hit', player: o.id, by: p.id, damage, dirX: dx, dirZ: dz });
