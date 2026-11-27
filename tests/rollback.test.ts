@@ -122,3 +122,19 @@ describe('sim', () => {
     expect(g.score).toEqual([0, 0]);
   });
 });
+
+describe('match stats', () => {
+  it('counts shots, hits and the longest hit, and resets on rematch', () => {
+    const g = createGame({ seed: 1 });
+    g.arena.boxes = [];
+    for (let i = 0; i < config.countdownTime * 60 + 2; i++) step(g, [emptyCommand(), emptyCommand()]);
+    const aim = Math.atan2(g.players[1].z - g.players[0].z, g.players[1].x - g.players[0].x);
+    for (let i = 0; i < 10; i++) step(g, [{ ...emptyCommand(), aimActive: true, aim, ads: true, fire: i >= 5 }, emptyCommand()]);
+    expect(g.stats.shots[0]).toBe(1);
+    expect(g.stats.hits[0]).toBe(1);
+    expect(g.stats.longest[0]).toBeGreaterThan(20);
+    g.phase = 'matchEnd';
+    step(g, [{ ...emptyCommand(), start: true }, emptyCommand()]);
+    expect(g.stats.shots).toEqual([0, 0]);
+  });
+});

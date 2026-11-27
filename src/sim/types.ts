@@ -84,6 +84,16 @@ export type SimEvent =
   | { type: 'roundWon'; player: number; score: number[] }
   | { type: 'matchWon'; player: number };
 
+/** Per-player match totals for the end screen, by player slot. Part of the sim, so rollback keeps them right. */
+export interface MatchStats {
+  shots: number[];
+  hits: number[]; // shots that dealt damage
+  charged: number[]; // empowered (kneel) hits
+  longest: number[]; // longest hit, meters
+}
+
+export const emptyStats = (): MatchStats => ({ shots: [0, 0], hits: [0, 0], charged: [0, 0], longest: [0, 0] });
+
 export interface GameState {
   tick: number;
   seed: number; // RNG state, advanced deterministically
@@ -94,6 +104,7 @@ export interface GameState {
   hitstop: number; // ticks the whole sim is frozen for impact
   slowmoTicks: number; // ticks of slow motion left (render reads this)
   players: PlayerState[];
+  stats: MatchStats;
   arena: Arena;
   events: SimEvent[]; // cleared at the start of every step
 }

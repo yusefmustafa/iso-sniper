@@ -57,6 +57,9 @@ export class KeyboardMouse implements InputDevice {
   /** Where the mouse is on screen (virtual while pointer-locked), or null before it has moved. */
   get cursor() { return this.hasMouse ? { x: this.mouseX, y: this.mouseY } : null; }
 
+  /** Capture the mouse again (the Esc menu's Resume button). */
+  capture() { if (this.lockEnabled && !this.locked) this.requestLock(); }
+
   private requestLock() {
     try {
       const r = this.target.requestPointerLock?.() as unknown;
