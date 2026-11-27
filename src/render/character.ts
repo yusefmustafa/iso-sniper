@@ -262,7 +262,9 @@ export class Character {
     // ---- body: lean, kneel crouch, step bob, and lowered to the floor while tucked.
     const bobY = Math.abs(Math.sin(this.bob)) * (0.05 + 0.04 * this.sprintAmt) * this.walk * (1 - this.tuck);
     this.body.position.y = bobY - this.kneel * THIGH - (PIVOT_Y - BALL_HEIGHT) * this.tuck;
-    this.body.rotation.set(this.lean.y, 0, -this.lean.x);
+    // Hit stun: rock back from the impact, easing out as the stun ends.
+    const stun = Math.min(1, p.stunTicks / Math.max(1, secToTicks(config.hitStunTime)));
+    this.body.rotation.set(this.lean.y, 0, -this.lean.x + 0.35 * stun * stun);
     this.spine.rotation.set(0, Math.sin(this.bob) * 0.14 * this.sprintAmt * (1 - this.tuck), -this.curl - 0.06 * this.sprintAmt);
 
     // ---- legs
@@ -316,11 +318,13 @@ export class Character {
     this.glint.material.rotation = time * 1.5;
     this.glint.material.opacity = ready ? 1 : 0.5 * building;
 
-    // ---- hit flash
+    // ---- hit flash, then a white blink for as long as the player is invulnerable
     this.flash = Math.max(0, this.flash - (frozen ? dt * 0.3 : dt));
+    const blink = p.invulnTicks > 0 && Math.floor(time * 12) % 2 === 0;
     this.materials.forEach((mat, i) => {
-      mat.emissive.setHex(this.flash > 0 ? 0xffffff : this.color);
-      mat.emissiveIntensity = this.flash > 0 ? 3 : i === 0 ? 0.12 : 0.6;
+      const white = this.flash > 0 || blink;
+      mat.emissive.setHex(white ? 0xffffff : this.color);
+      mat.emissiveIntensity = this.flash > 0 ? 3 : blink ? 1.1 : i === 0 ? 0.12 : 0.6;
     });
   }
 

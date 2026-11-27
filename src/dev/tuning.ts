@@ -8,7 +8,7 @@ export function createTuningPanel(locked: () => boolean = () => false) {
     Movement: ['walkSpeed', 'sprintSpeed', 'adsSpeed', 'accelTime', 'stopTime', 'sprintRampTime', 'gunRaiseTime'],
     Roll: ['rollDistance', 'rollTime', 'rollCooldown', 'rollEndSpeedFactor', 'rollTowardCursor', 'kneelWindow'],
     Shooting: ['hipSpreadDeg', 'boltTime', 'kneelChargeTime', 'inputBuffer'],
-    'Hit feel': ['hitstopFrames', 'chargedHitstopFrames', 'knockback', 'selfKnockback', 'knockbackTime', 'finalShotSlowmo', 'finalShotSlowmoTime'],
+    'Hit feel': ['hitstopFrames', 'chargedHitstopFrames', 'knockback', 'hitStunTime', 'invulnTime', 'selfKnockback', 'knockbackTime', 'finalShotSlowmo', 'finalShotSlowmoTime'],
     Match: ['maxHp', 'chargedDamage', 'roundsToWin'],
   };
   const ints = new Set(['rollTowardCursor', 'hitstopFrames', 'chargedHitstopFrames', 'maxHp', 'chargedDamage', 'roundsToWin']);

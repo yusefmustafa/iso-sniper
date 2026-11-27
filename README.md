@@ -45,6 +45,8 @@ Keyboard + mouse and controllers both work; whichever you touched last drives yo
   A Dev section has live feel toggles: roll direction (where you move / toward the cursor; a game rule, the
   match creator's choice applies online), sprint facing (snap / turn / keep facing the cursor) and the sprint
   rifle carry (across the chest / low ready / one hand).
+- Getting hit stuns you for 0.25 s and pushes you back, then you're invulnerable for 3 s (you blink white).
+  You can still shoot while invulnerable; shots that hit you stop in a white burst and do nothing.
 - First to 3 rounds wins.
 
 All numbers live in `src/config.ts` and can be changed live from the tuning panel.

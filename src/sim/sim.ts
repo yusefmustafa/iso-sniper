@@ -21,7 +21,7 @@ function newPlayer(id: number, state: GameState, dummy: boolean, cfg: Config): P
     id, x: s.x, z: s.z, vx: 0, vz: 0, aim: s.aim, hp: cfg.maxHp,
     stance: 'normal', ads: false, adsTicks: 0, boltTicks: 0, gunRaiseTicks: 0,
     rollTicks: 0, rollDirX: 0, rollDirZ: 0, rollCooldownTicks: 0, sinceRollTicks: 9999,
-    fireBuffer: 0, rollBuffer: 0, knockX: 0, knockZ: 0, knockTicks: 0, sprintRamp: 0,
+    fireBuffer: 0, rollBuffer: 0, knockX: 0, knockZ: 0, knockTicks: 0, stunTicks: 0, invulnTicks: 0, sprintRamp: 0,
     prevFire: false, prevRoll: false, dummy,
   };
 }
@@ -115,12 +115,13 @@ export function step(state: GameState, commands: Command[], cfg: Config = defaul
       break;
   }
 
-  state.players.forEach((p, i) => updatePlayer(state, p, p.dummy ? undefined : commands[i], cfg));
+  // The practice dummy normally gets empty commands; the dev toggle can make it shoot.
+  state.players.forEach((p, i) => updatePlayer(state, p, commands[i], cfg));
   separatePlayers(state, cfg);
 }
 
 function bufferPresses(p: PlayerState, c: Command | undefined, cfg: Config) {
-  if (!c || p.dummy) return;
+  if (!c) return;
   if (c.fire && !p.prevFire) p.fireBuffer = secToTicks(cfg.inputBuffer, cfg);
   if (c.roll && !p.prevRoll) p.rollBuffer = secToTicks(cfg.inputBuffer, cfg);
   p.prevFire = c.fire;
@@ -138,6 +139,16 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
     if (p.boltTicks === 0) state.events.push({ type: 'boltReady', player: p.id });
   }
   if (p.stance !== 'roll') p.sinceRollTicks++;
+  if (p.invulnTicks > 0) p.invulnTicks--;
+
+  // Hit stun: input is ignored for a moment (aim still follows the cursor). Held buttons are
+  // tracked so nothing fires the instant the stun ends, and buffered presses are dropped.
+  if (p.stunTicks > 0) {
+    p.stunTicks--;
+    if (c) { if (c.aimActive) p.aim = c.aim; p.prevFire = c.fire; p.prevRoll = c.roll; }
+    p.fireBuffer = 0; p.rollBuffer = 0;
+    c = undefined;
+  }
 
   bufferPresses(p, c, cfg);
 
@@ -312,6 +323,7 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
   state.events.push({
     type: 'shot', player: p.id, fromX: ox, fromZ: oz,
     toX: ox + dx * dist, toZ: oz + dz * dist, charged, aimed, hit,
+    blocked: hit !== null && state.players[hit].invulnTicks > 0,
   });
 
   p.boltTicks = secToTicks(cfg.boltTime, cfg);
@@ -326,13 +338,16 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
     p.knockTicks = secToTicks(cfg.knockbackTime, cfg);
   }
 
-  if (hit !== null) {
+  // A shot that hits an invulnerable player stops on them but does nothing.
+  if (hit !== null && state.players[hit].invulnTicks === 0) {
     const o = state.players[hit];
     const damage = charged ? cfg.chargedDamage : 1;
     o.hp = Math.max(0, o.hp - damage);
     o.knockX = dx * cfg.knockback / cfg.knockbackTime;
     o.knockZ = dz * cfg.knockback / cfg.knockbackTime;
     o.knockTicks = secToTicks(cfg.knockbackTime, cfg);
+    o.stunTicks = secToTicks(cfg.hitStunTime, cfg);
+    o.invulnTicks = secToTicks(cfg.invulnTime, cfg);
     // Getting shot breaks your aim.
     o.ads = false; o.adsTicks = 0;
     if (o.stance === 'kneel') o.stance = 'normal';

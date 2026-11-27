@@ -204,7 +204,11 @@ function tick() {
     prev = state.players.map((p) => ({ x: p.x, z: p.z }));
     const cmd = input.command(state.players[0]);
     input.endTick();
-    step(state, [cmd, emptyCommand()]);
+    // Dev toggle: the dummy focuses straight ahead (along its spawn direction) and fires whenever its bolt is ready.
+    const dummyCmd = settings.dummyFires === 'on'
+      ? { ...emptyCommand(), aimActive: true, aim: state.arena.spawns[1].aim, ads: true, fire: state.tick % 2 === 0 }
+      : emptyCommand();
+    step(state, [cmd, dummyCmd]);
     handleEvents(state.events);
     return;
   }

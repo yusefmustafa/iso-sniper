@@ -14,7 +14,7 @@ export function hashState(s: GameState): number {
   for (const p of s.players) {
     nums.push(p.x, p.z, p.vx, p.vz, p.aim, p.hp, STANCES.indexOf(p.stance), +p.ads, p.adsTicks, p.boltTicks, p.gunRaiseTicks,
       p.rollTicks, p.rollDirX, p.rollDirZ, p.rollCooldownTicks, p.sinceRollTicks, p.fireBuffer, p.rollBuffer,
-      p.knockX, p.knockZ, p.knockTicks, p.sprintRamp, +p.prevFire, +p.prevRoll);
+      p.knockX, p.knockZ, p.knockTicks, p.stunTicks, p.invulnTicks, p.sprintRamp, +p.prevFire, +p.prevRoll);
   }
   const bytes = new Uint8Array(new Float64Array(nums).buffer);
   let h = 0x811c9dc5;

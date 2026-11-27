@@ -2,7 +2,7 @@ import { config } from '../config';
 import { settings } from '../settings';
 import { rayToWorld } from '../sim/arena';
 import { chargeProgress, gunUp, isCharged } from '../sim/sim';
-import type { GameState } from '../sim/types';
+import type { Arena, GameState } from '../sim/types';
 import { AIM_HEIGHT, PLAYER_COLORS } from './scene';
 
 const DEG = Math.PI / 180;
@@ -44,6 +44,13 @@ export class AimCursor {
     this.canvas.height = Math.round(window.innerHeight * this.dpr);
   }
 
+  private openArenaCache: { src: Arena; open: Arena } | null = null;
+  /** The arena without its cover, for rays that should only stop at the outer walls. */
+  private openArena(arena: Arena): Arena {
+    if (this.openArenaCache?.src !== arena) this.openArenaCache = { src: arena, open: { ...arena, boxes: [] } };
+    return this.openArenaCache.open;
+  }
+
   clear() {
     this.g.setTransform(1, 0, 0, 1, 0, 0);
     this.g.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -75,29 +82,30 @@ export class AimCursor {
       const alpha = ready ? 1 : 0.35;
       const half = (config.hipSpreadDeg / 2) * DEG * open;
       const start = 0.7; // start the cone just past the muzzle
-      // Settings: end the cone at the cursor, or project it the whole way out. Projected, every
-      // ray of the cone runs to where a shot along it would stop (or through walls to max range),
-      // so the far edge follows the cover instead of ending in a cap.
+      // Settings: end the cone at the cursor, or project it the whole way out to the arena edge.
+      // Projected, each ray is colored up to where a shot along it would stop; past cover the
+      // rest of it is greyed out ("Grey out blocked"), or colored all the way ("Through walls").
       const full = settings.coneLength === 'full';
-      const clip = settings.coneWalls === 'stop';
-      const rayEnd = (ang: number) => !full ? reach
-        : clip ? Math.max(start, rayToWorld(state.arena, pos.x, pos.z, Math.cos(ang), Math.sin(ang), config.shotRange))
-        : config.shotRange;
+      const grey = settings.coneWalls === 'stop';
+      const open2 = this.openArena(state.arena);
 
-      // Cone: two edges and its far end.
       if (open > 0.02) {
         const steps = full ? 48 : 12;
-        g.beginPath();
-        const a = at(p.aim - half, start);
-        g.moveTo(a.x, a.y);
+        const hit: { x: number; y: number }[] = [], far: { x: number; y: number }[] = [];
         for (let s = 0; s <= steps; s++) {
           const ang = p.aim - half + (2 * half * s) / steps;
-          const q = at(ang, rayEnd(ang));
-          g.lineTo(q.x, q.y);
+          const dx = Math.cos(ang), dz = Math.sin(ang);
+          if (!full) { hit.push(at(ang, reach)); continue; }
+          const edge = Math.max(start, rayToWorld(open2, pos.x, pos.z, dx, dz, config.shotRange));
+          const stop = grey ? Math.max(start, Math.min(edge, rayToWorld(state.arena, pos.x, pos.z, dx, dz, config.shotRange))) : edge;
+          hit.push(at(ang, stop));
+          far.push(at(ang, edge));
         }
-        const b = at(p.aim + half, start);
-        g.lineTo(b.x, b.y);
-        g.closePath();
+        const a = at(p.aim - half, start), b = at(p.aim + half, start);
+        const poly = (pts: { x: number; y: number }[]) => { g.beginPath(); g.moveTo(pts[0].x, pts[0].y); for (const q of pts) g.lineTo(q.x, q.y); g.closePath(); };
+
+        // Live part: where a hip shot can actually land.
+        poly([a, ...hit, b]);
         g.globalAlpha = (full ? 0.08 : 0.12) * alpha * open;
         g.fillStyle = color;
         g.fill();
@@ -105,6 +113,20 @@ export class AimCursor {
         g.strokeStyle = color;
         g.lineWidth = 1.5;
         g.stroke();
+
+        // Blocked part: the same cone continuing behind cover, in grey.
+        if (full && grey) {
+          poly([...hit, ...far.slice().reverse()]);
+          g.globalAlpha = 0.07 * alpha * open;
+          g.fillStyle = '#9aa1ad';
+          g.fill();
+          g.globalAlpha = 0.35 * alpha * Math.max(0.3, open);
+          g.strokeStyle = '#9aa1ad';
+          g.lineWidth = 1;
+          g.beginPath(); g.moveTo(hit[0].x, hit[0].y); g.lineTo(far[0].x, far[0].y);
+          g.moveTo(hit[steps].x, hit[steps].y); g.lineTo(far[steps].x, far[steps].y);
+          g.stroke();
+        }
       }
 
       // Crosshair at the cursor: grows in as the cone closes.

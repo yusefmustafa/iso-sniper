@@ -5,7 +5,7 @@
 export interface Settings {
   /** 'cursor': the hip-fire cone ends at the cursor. 'full': it runs on to the first wall, as the bullet does. */
   coneLength: 'cursor' | 'full';
-  /** With the full cone: stop each ray at the first wall/cover, or draw through to max range. */
+  /** With the full cone (which always runs to the arena edge): grey out the part behind cover, or color all of it. */
   coneWalls: 'stop' | 'through';
   /** Where the body faces while sprinting: snaps to the run direction, turns toward it, or keeps facing the cursor. */
   sprintFacing: 'snap' | 'turn' | 'aim';
@@ -16,10 +16,12 @@ export interface Settings {
    * copied into the sim config (online, the host's choice is used for both players).
    */
   rollDirection: 'move' | 'cursor';
+  /** Practice only: the dummy shoots straight ahead, to test getting hit. */
+  dummyFires: 'off' | 'on';
 }
 
 const KEY = 'iso-sniper:settings:v3'; // bumped when a default changes (v2 full cone, v3 low-ready sprint)
-const defaults: Settings = { coneLength: 'full', coneWalls: 'stop', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move' };
+const defaults: Settings = { coneLength: 'full', coneWalls: 'stop', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move', dummyFires: 'off' };
 
 function load(): Settings {
   try {
@@ -45,13 +47,18 @@ const choices: Choice<keyof Settings>[] = [
   },
   {
     key: 'coneWalls', label: 'Full cone at walls', dev: true,
-    hint: 'Stop each edge where a shot would stop, or draw through cover to max range.',
-    options: [{ value: 'stop', label: 'Stop at walls' }, { value: 'through', label: 'Through walls' }],
+    hint: 'Grey out the part of the cone behind cover, or color it all the way to the arena edge.',
+    options: [{ value: 'stop', label: 'Grey out blocked' }, { value: 'through', label: 'Color it all' }],
   },
   {
     key: 'rollDirection', label: 'Roll direction', dev: true,
     hint: 'Game rule. Online, the match creator\'s choice applies to both players.',
     options: [{ value: 'move', label: 'Where I move' }, { value: 'cursor', label: 'Toward cursor' }],
+  },
+  {
+    key: 'dummyFires', label: 'Dummy shoots', dev: true,
+    hint: 'Practice: the dummy aims straight ahead and fires whenever it can. Step into its laser to test getting hit.',
+    options: [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }],
   },
   {
     key: 'sprintFacing', label: 'Sprint facing', dev: true,

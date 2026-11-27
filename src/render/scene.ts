@@ -212,7 +212,8 @@ export class GameRenderer {
         this.muzzleLight.position.set(e.fromX, AIM_HEIGHT + 0.2, e.fromZ);
         this.muzzleLight.intensity = e.charged ? 40 : 25;
         this.addTrauma(e.charged ? 0.35 : 0.2);
-        this.spawnSparks(e.toX, e.toZ, e.hit !== null ? PLAYER_COLORS[e.hit] : 0xffe2b0, e.hit !== null ? 14 : 8);
+        // A shot into an invulnerable player stops in a burst of white: no damage.
+        this.spawnSparks(e.toX, e.toZ, e.blocked ? 0xffffff : e.hit !== null ? PLAYER_COLORS[e.hit] : 0xffe2b0, e.hit !== null ? 14 : 8);
       } else if (e.type === 'hit') {
         this.views[e.player].char.flash = 0.12;
         this.addTrauma(e.damage > 1 ? 0.8 : 0.5);

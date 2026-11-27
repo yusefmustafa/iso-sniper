@@ -45,7 +45,9 @@ export interface PlayerState {
   rollBuffer: number; // ticks left on a buffered roll press
   knockX: number; // knockback velocity
   knockZ: number;
-  knockTicks: number; // fractional during slow motion
+  knockTicks: number;
+  stunTicks: number; // >0 right after being hit: no move, shoot or roll input
+  invulnTicks: number; // >0 after being hit: shots can't damage you (you can still shoot) // fractional during slow motion
   sprintRamp: number; // 0..1
   prevFire: boolean;
   prevRoll: boolean;
@@ -70,7 +72,7 @@ export interface Arena {
 export type Phase = 'countdown' | 'playing' | 'roundEnd' | 'matchEnd';
 
 export type SimEvent =
-  | { type: 'shot'; player: number; fromX: number; fromZ: number; toX: number; toZ: number; charged: boolean; aimed: boolean; hit: number | null }
+  | { type: 'shot'; player: number; fromX: number; fromZ: number; toX: number; toZ: number; charged: boolean; aimed: boolean; hit: number | null; blocked: boolean }
   | { type: 'hit'; player: number; by: number; damage: number; dirX: number; dirZ: number }
   | { type: 'charged'; player: number }
   | { type: 'boltReady'; player: number }

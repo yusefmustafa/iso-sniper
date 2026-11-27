@@ -42,6 +42,8 @@ export const config = {
   hitstopFrames: 4,
   chargedHitstopFrames: 8,
   knockback: 1.5, // meters of push on hit
+  hitStunTime: 0.25, // after being hit: no move, shoot or roll
+  invulnTime: 3, // after being hit: can't take damage (blinks white)
   selfKnockback: 0.8, // meters the shooter is kicked back by an empowered shot
   knockbackTime: 0.15,
 
