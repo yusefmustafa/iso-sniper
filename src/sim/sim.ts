@@ -158,8 +158,10 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   // Roll start (buffered press)
   if (p.rollBuffer > 0 && p.rollCooldownTicks === 0 && p.stance !== 'roll') {
     p.rollBuffer = 0;
-    const dx = moving ? mx / Math.max(mlen, 1e-6) : dcos(p.aim);
-    const dz = moving ? mz / Math.max(mlen, 1e-6) : dsin(p.aim);
+    // Roll toward the move direction (falls back to the aim when standing still), or always toward the aim.
+    const towardAim = cfg.rollTowardCursor >= 0.5 || !moving;
+    const dx = towardAim ? dcos(p.aim) : mx / Math.max(mlen, 1e-6);
+    const dz = towardAim ? dsin(p.aim) : mz / Math.max(mlen, 1e-6);
     const n = dhypot(dx, dz) || 1;
     p.rollDirX = dx / n; p.rollDirZ = dz / n;
     p.stance = 'roll';

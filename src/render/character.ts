@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { config } from '../config';
+import { settings } from '../settings';
 import { chargeProgress, isCharged, secToTicks } from '../sim/sim';
 import type { PlayerState } from '../sim/types';
 
@@ -51,7 +52,9 @@ export class Character {
   private wasRolling = false;
   private tuck = 0; // 0..1 legs tucked (rolling)
   private curl = 0; // radians the upper body curls forward (rolling)
-  private yawBlend = 0; // 0 = body faces the aim, 1 = body faces the roll direction
+  private yaw = 0; // where the body faces (the aim, unless rolling or sprinting)
+  private recovering = false; // turning back to the aim after a roll or sprint
+  private sprintAmt = 0; // 0..1 smoothed sprint
   private bob = 0;
   private lean = new THREE.Vector2();
   private kneel = 0;
@@ -177,14 +180,29 @@ export class Character {
     const total = secToTicks(config.rollTime);
     const t = rolling ? Math.min(1, 1 - p.rollTicks / total) : 1;
 
-    // ---- facing: the body turns into the roll, then back to the aim as it comes up.
-    // (The aim itself keeps tracking the mouse the whole time; only the body turns.)
-    if (!frozen) this.yawBlend = rolling ? Math.min(1, this.yawBlend + dt / 0.05) : Math.max(0, this.yawBlend - dt / 0.18);
-    const rollYaw = Math.atan2(p.rollDirZ, p.rollDirX);
-    const yaw = p.aim + wrapAngle(rollYaw - p.aim) * smoothstep(this.yawBlend);
+    // ---- facing. The aim (cone, laser) always tracks the cursor; only the body turns:
+    // into the roll, toward the run while sprinting (per settings), then back to the aim.
+    const speed = Math.hypot(p.vx, p.vz);
+    const sprinting = p.stance === 'sprint';
+    if (!frozen) {
+      const rollYaw = Math.atan2(p.rollDirZ, p.rollDirX);
+      const runYaw = speed > 0.5 ? Math.atan2(p.vz, p.vx) : this.yaw;
+      if (rolling) {
+        this.yaw = approachAngle(this.yaw, rollYaw, 40 * dt);
+        this.recovering = true;
+      } else if (sprinting && settings.sprintFacing !== 'aim') {
+        this.yaw = settings.sprintFacing === 'snap' ? runYaw : approachAngle(this.yaw, runYaw, 9.5 * dt); // ~540 deg/s
+        this.recovering = true;
+      } else if (this.recovering) {
+        this.yaw = approachAngle(this.yaw, p.aim, 16 * dt); // ~0.2 s for a half turn, inside the gun-raise time
+        if (Math.abs(wrapAngle(p.aim - this.yaw)) < 0.03) this.recovering = false;
+      } else {
+        this.yaw = p.aim;
+      }
+    }
+    const yaw = this.yaw;
     this.root.rotation.y = -yaw;
 
-    const speed = Math.hypot(p.vx, p.vz);
     const fwdX = Math.cos(yaw), fwdZ = Math.sin(yaw);
     // Velocity in the body's local frame.
     const localFwd = (p.vx * fwdX + p.vz * fwdZ) / config.sprintSpeed;
@@ -208,9 +226,9 @@ export class Character {
     this.pivot.rotation.set(0, 0, -this.rollSpin);
     this.pivot.scale.setScalar(1 - 0.1 * this.tuck);
 
-    const sprinting = p.stance === 'sprint';
     if (!frozen) {
-      this.lean.x += ((rolling ? 0 : localFwd * (sprinting ? 0.42 : 0.28)) - this.lean.x) * k(10);
+      this.sprintAmt += ((sprinting ? 1 : 0) - this.sprintAmt) * k(10);
+      this.lean.x += ((rolling ? 0 : localFwd * (sprinting ? 0.24 : 0.28)) - this.lean.x) * k(10);
       this.lean.y += ((rolling ? 0 : localSide * 0.28) - this.lean.y) * k(10);
       this.bob += dt * (6 + Math.min(speed, config.sprintSpeed) * 1.6) * (speed > 0.3 ? 1 : 0);
       this.kneel += ((p.stance === 'kneel' ? 1 : 0) - this.kneel) * k(16);
@@ -230,21 +248,21 @@ export class Character {
     }
 
     // ---- body: lean, kneel crouch, step bob, and lowered to the floor while tucked.
-    const bobY = Math.abs(Math.sin(this.bob)) * 0.05 * this.walk * (1 - this.tuck);
+    const bobY = Math.abs(Math.sin(this.bob)) * (0.05 + 0.04 * this.sprintAmt) * this.walk * (1 - this.tuck);
     this.body.position.y = bobY - this.kneel * THIGH - (PIVOT_Y - BALL_HEIGHT) * this.tuck;
     this.body.rotation.set(this.lean.y, 0, -this.lean.x);
-    this.spine.rotation.z = -this.curl - (sprinting ? 0.08 : 0);
+    this.spine.rotation.set(0, Math.sin(this.bob) * 0.14 * this.sprintAmt * (1 - this.tuck), -this.curl - 0.06 * this.sprintAmt);
 
     // ---- legs
     const walkAmt = this.walk * (1 - this.kneel) * (1 - this.tuck);
     this.legs.forEach((leg, i) => {
       const sign = i === 0 ? 1 : -1; // i 0 = left leg
-      const swing = Math.sin(this.bob) * sign * 0.6 * walkAmt;
+      const swing = Math.sin(this.bob) * sign * (0.55 + 0.1 * this.sprintAmt) * walkAmt;
       const liftPhase = Math.max(0, Math.cos(this.bob) * sign);
       const dir = this.stepDir;
       // Forward pitch = +rotation.z on the hip; knees bend with -rotation.z.
       let hipPitch = 1.9 * this.tuck;
-      let kneeBend = -2.2 * this.tuck - liftPhase * 0.9 * walkAmt;
+      let kneeBend = -2.2 * this.tuck - (liftPhase * (0.9 + 0.5 * this.sprintAmt) + 0.3 * this.sprintAmt) * walkAmt;
       // Kneel: left foot planted in front, right knee on the ground.
       if (i === 0) { hipPitch += 1.45 * this.kneel; kneeBend += -1.45 * this.kneel; }
       else { hipPitch += -0.05 * this.kneel; kneeBend += -1.5 * this.kneel; }
@@ -253,14 +271,28 @@ export class Character {
       leg.ankle.rotation.z = -(hipPitch + kneeBend + swing * dir.x) * 0.85; // keep the boot roughly flat
     });
 
-    // ---- rifle: lowered when sprinting, hugged to the chest in a roll, kicked back on recoil.
+    // ---- rifle: blend between the aim pose, the sprint carry pose (per settings) and the roll pose.
     const kick = Math.min(1.6, this.recoil);
-    // In the tuck the rifle swings across the chest so it rolls with the body instead of poking out.
-    this.gun.rotation.set(0, -1.25 * this.tuck, -this.gunDown * 0.85 + this.tuck * 0.35 + kick * 0.22);
-    this.gun.position.x = 0.02 - kick * 0.1 - this.tuck * 0.12;
-    this.gun.position.y = SHOULDER_HEIGHT + (p.ads ? 0.02 : 0);
+    const carry = CARRY_POSES[settings.sprintCarry];
+    const aimPose = AIM_POSE;
+    const c = this.gunDown;
+    const pose = (i: number, which: 'pos' | 'rot') => {
+      const base = aimPose[which][i] + (carry[which][i] - aimPose[which][i]) * c;
+      return base + (ROLL_POSE[which][i] - base) * this.tuck;
+    };
+    const bounce = Math.sin(this.bob * 2) * 0.025 * this.sprintAmt;
+    this.gun.position.set(pose(0, 'pos') - kick * 0.1, pose(1, 'pos') + bounce + (p.ads ? 0.02 : 0), pose(2, 'pos'));
+    this.gun.rotation.set(pose(0, 'rot'), pose(1, 'rot'), pose(2, 'rot') + kick * 0.22);
     this.gun.updateMatrix();
-    for (const arm of this.arms) this.solveArm(arm);
+    // One-hand carry frees the left arm to swing with the stride.
+    const freeLeft = (settings.sprintCarry === 'onehand' ? c : 0) * (1 - this.tuck);
+    this.arms.forEach((arm, i) => {
+      if (i === 1 && freeLeft > 0.01) {
+        const swingFwd = -Math.sin(this.bob) * 0.26 * this.walk; // opposite the left leg
+        _free.set(arm.shoulder.x + swingFwd, arm.shoulder.y - 0.5, arm.shoulder.z - 0.05);
+        this.solveArm(arm, freeLeft);
+      } else this.solveArm(arm, 0);
+    });
 
     // ---- scope glint: steady twinkle while the empowered shot is ready, a flare when it arrives.
     const ready = isCharged(p);
@@ -281,9 +313,10 @@ export class Character {
   }
 
   /** Two-bone IK from the shoulder to a hold point on the rifle, both in model space. */
-  private solveArm(arm: Arm) {
+  private solveArm(arm: Arm, free: number) {
     const s = arm.shoulder;
     const h = arm.grip.clone().applyMatrix4(this.gun.matrix);
+    if (free > 0) h.lerp(_free, free);
     const toHand = h.clone().sub(s);
     const d = Math.min(toHand.length(), (UPPER_ARM + FOREARM) * 0.999);
     const dir = toHand.normalize();
@@ -347,3 +380,23 @@ const smoothstep = (x: number) => { const u = Math.min(1, Math.max(0, x)); retur
 /** 0 before a, 1 after b, smooth in between. */
 const ramp = (t: number, a: number, b: number) => smoothstep((t - a) / (b - a));
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** Turn angle a toward b by at most maxStep radians, the short way round. */
+function approachAngle(a: number, b: number, maxStep: number) {
+  const d = wrapAngle(b - a);
+  return Math.abs(d) <= maxStep ? b : a + Math.sign(d) * maxStep;
+}
+
+const _free = new THREE.Vector3();
+
+interface GunPose { pos: [number, number, number]; rot: [number, number, number] }
+/** Shouldered, barrel along the aim. */
+const AIM_POSE: GunPose = { pos: [0.02, SHOULDER_HEIGHT, 0.13], rot: [0, 0, 0] };
+/** Tucked across the chest during a roll so it rolls with the body. */
+const ROLL_POSE: GunPose = { pos: [-0.1, SHOULDER_HEIGHT, 0.13], rot: [0, -1.25, -0.5] };
+/** Sprint carries. Euler order XYZ: rot[2] pitches the barrel, then rot[1] swings it (positive = toward the left side). */
+const CARRY_POSES: Record<'port' | 'low' | 'onehand', GunPose> = {
+  port: { pos: [0.24, SHOULDER_HEIGHT - 0.18, 0.04], rot: [0.25, 1.3, 0.32] }, // across the chest, muzzle up and to the left
+  low: { pos: [0.02, SHOULDER_HEIGHT, 0.13], rot: [0, 0, -0.85] }, // low ready, muzzle down in front
+  onehand: { pos: [0.08, SHOULDER_HEIGHT - 0.4, 0.27], rot: [0, 0, -0.25] }, // in the right hand at the hip
+};

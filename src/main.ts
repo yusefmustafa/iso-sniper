@@ -11,7 +11,7 @@ import { hashState } from './net/snapshot';
 import { connectOnline } from './net/webrtc';
 import { Sfx } from './render/audio';
 import { AimCursor } from './render/cursor';
-import { SettingsUi } from './settings';
+import { settings, SettingsUi } from './settings';
 import { Hud, type LobbyView } from './render/hud';
 import { GameRenderer } from './render/scene';
 import { createGame, step } from './sim/sim';
@@ -258,6 +258,8 @@ function frame(now: number) {
   }
   hud.setLeave(mode !== 'lobby' && !kbm.locked, leaveMatch);
   settingsUi.setAvailable(mode === 'lobby' || !kbm.locked);
+  // The roll direction setting is a game rule; online matches run on the host's copy of the config.
+  if (mode !== 'online') config.rollTowardCursor = settings.rollDirection === 'cursor' ? 1 : 0;
   updateNetHud();
   requestAnimationFrame(frame);
 }
@@ -274,7 +276,7 @@ requestAnimationFrame(frame);
 
 // Handle for automated smoke tests and debugging in the console.
 (window as unknown as { __iso: unknown }).__iso = {
-  get state() { return state; }, get mode() { return mode; }, get session() { return session; }, get lobby() { return lobby; }, config, renderer,
+  get state() { return state; }, get mode() { return mode; }, get session() { return session; }, get lobby() { return lobby; }, config, renderer, settings,
   /** Replay a session's recorded inputs offline and hash the state at `frame` (desync debugging). */
   replayState(frame: number) {
     if (!session?.history) return null;

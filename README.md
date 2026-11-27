@@ -41,7 +41,10 @@ Keyboard + mouse and controllers both work; whichever you touched last drives yo
 - Focused shots go exactly down the laser. Hip-fire spreads inside an 8 degree cone, drawn as the cone cursor.
 - One round in the chamber: 1.2 s bolt cycle after every shot (grey ring under you).
 - Sprinting lowers the gun. Rolling straight into focus while still holding roll drops you into a kneel: you stay planted, your hitbox shrinks and the empowered shot charges in 0.5 s (the scope glints when it's ready). Firing it kicks you back about 0.8 m and stands you up. Let go of focus or roll to stand.
-- Settings (top left while the mouse is free): the hip-fire cone can stop at the cursor or run on to the wall.
+- Settings (top left while the mouse is free, or F2 any time): the hip-fire cone can stop at the cursor or run on to the wall.
+  A Dev section has live feel toggles: roll direction (where you move / toward the cursor; a game rule, the
+  match creator's choice applies online), sprint facing (snap / turn / keep facing the cursor) and the sprint
+  rifle carry (across the chest / low ready / one hand).
 - First to 3 rounds wins.
 
 All numbers live in `src/config.ts` and can be changed live from the tuning panel.

@@ -58,6 +58,15 @@ describe('shooting', () => {
     expect(x0 - g.players[0].x).toBeGreaterThan(config.selfKnockback * 0.7);
   });
 
+  it('rollTowardCursor rolls along the aim instead of the move direction', () => {
+    const g = playing();
+    const cfg = { ...config, rollTowardCursor: 1 };
+    step(g, [cmd({ moveZ: 1, roll: true, aim: 0 }), cmd({ aim: Math.PI })], cfg);
+    expect(g.players[0].stance).toBe('roll');
+    expect(g.players[0].rollDirX).toBeCloseTo(1, 5);
+    expect(g.players[0].rollDirZ).toBeCloseTo(0, 5);
+  });
+
   it('aim keeps tracking while rolling', () => {
     const g = playing();
     run(g, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));

@@ -5,10 +5,19 @@
 export interface Settings {
   /** 'cursor': the hip-fire cone ends at the cursor. 'full': it runs on to the first wall, as the bullet does. */
   coneLength: 'cursor' | 'full';
+  /** Where the body faces while sprinting: snaps to the run direction, turns toward it, or keeps facing the cursor. */
+  sprintFacing: 'snap' | 'turn' | 'aim';
+  /** How the rifle is carried while sprinting. */
+  sprintCarry: 'port' | 'low' | 'onehand';
+  /**
+   * Roll toward the move direction or the cursor. This one is a game rule: it is
+   * copied into the sim config (online, the host's choice is used for both players).
+   */
+  rollDirection: 'move' | 'cursor';
 }
 
 const KEY = 'iso-sniper:settings';
-const defaults: Settings = { coneLength: 'cursor' };
+const defaults: Settings = { coneLength: 'cursor', sprintFacing: 'turn', sprintCarry: 'port', rollDirection: 'move' };
 
 function load(): Settings {
   try {
@@ -24,13 +33,28 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* not saved, still applies this session */ }
 }
 
-interface Choice<K extends keyof Settings> { key: K; label: string; hint: string; options: { value: Settings[K]; label: string }[] }
+interface Choice<K extends keyof Settings> { key: K; label: string; hint: string; dev?: boolean; options: { value: Settings[K]; label: string }[] }
 
 const choices: Choice<keyof Settings>[] = [
   {
     key: 'coneLength', label: 'Hip-fire cone',
     hint: 'Hip shots can land anywhere inside the cone, all the way to the wall.',
     options: [{ value: 'cursor', label: 'Stop at cursor' }, { value: 'full', label: 'Full range' }],
+  },
+  {
+    key: 'rollDirection', label: 'Roll direction', dev: true,
+    hint: 'Game rule. Online, the match creator\'s choice applies to both players.',
+    options: [{ value: 'move', label: 'Where I move' }, { value: 'cursor', label: 'Toward cursor' }],
+  },
+  {
+    key: 'sprintFacing', label: 'Sprint facing', dev: true,
+    hint: 'Where your body points while sprinting (look only).',
+    options: [{ value: 'snap', label: 'Snap' }, { value: 'turn', label: 'Turn' }, { value: 'aim', label: 'Cursor' }],
+  },
+  {
+    key: 'sprintCarry', label: 'Sprint rifle carry', dev: true,
+    hint: 'How the rifle is held while sprinting (look only).',
+    options: [{ value: 'port', label: 'Across chest' }, { value: 'low', label: 'Low ready' }, { value: 'onehand', label: 'One hand' }],
   },
 ];
 
@@ -48,7 +72,15 @@ export class SettingsUi {
     this.panel.className = 'settings-panel';
     this.panel.hidden = true;
     parent.append(this.button, this.panel);
-    window.addEventListener('keydown', (e) => { if (e.code === 'Escape') this.toggle(false); });
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape') this.toggle(false);
+      // F2 opens the panel any time, even mid-match (it frees the mouse).
+      if (e.code === 'F2') {
+        e.preventDefault();
+        if (this.panel.hidden) document.exitPointerLock?.();
+        this.toggle(this.panel.hidden);
+      }
+    });
     this.render();
   }
 
@@ -66,11 +98,14 @@ export class SettingsUi {
   }
 
   private render() {
-    const rows = choices.map((c) => `
+    const row = (c: Choice<keyof Settings>) => `
       <div class="row"><div class="label">${c.label}<small>${c.hint}</small></div>
         <div class="seg">${c.options.map((o) => `<button data-key="${c.key}" data-value="${o.value}" class="${settings[c.key] === o.value ? 'on' : ''}">${o.label}</button>`).join('')}</div>
-      </div>`).join('');
-    this.panel.innerHTML = `<h2>Settings</h2>${rows}<button class="done">Done</button>`;
+      </div>`;
+    const rows = (dev: boolean) => choices.filter((c) => !!c.dev === dev).map(row).join('');
+    this.panel.innerHTML = `<h2>Settings</h2>${rows(false)}
+      <h3>Dev: feel testing<small>Changes apply instantly. F2 opens this mid-match. For the numbers, press \` for the tuning panel.</small></h3>${rows(true)}
+      <button class="done">Done</button>`;
     this.panel.querySelectorAll<HTMLButtonElement>('button[data-key]').forEach((b) => b.addEventListener('click', () => {
       (settings as unknown as Record<string, string>)[b.dataset.key!] = b.dataset.value!;
       save();

@@ -28,6 +28,7 @@ export const config = {
   rollTime: 0.45,
   rollCooldown: 1.0,
   rollEndSpeedFactor: 0.4, // speed at the very end of the roll, relative to peak (about walking speed)
+  rollTowardCursor: 0, // 0 = roll where you move, 1 = always roll toward the aim/cursor
   kneelWindow: 0.25, // focus within this long after a roll ends, roll still held = kneel
 
   // Shooting

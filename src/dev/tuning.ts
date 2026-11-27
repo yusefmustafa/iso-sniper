@@ -6,12 +6,12 @@ export function createTuningPanel(locked: () => boolean = () => false) {
   const gui = new GUI({ title: 'Tuning (`)' });
   const groups: Record<string, (keyof typeof config)[]> = {
     Movement: ['walkSpeed', 'sprintSpeed', 'adsSpeed', 'accelTime', 'stopTime', 'sprintRampTime', 'gunRaiseTime'],
-    Roll: ['rollDistance', 'rollTime', 'rollCooldown', 'rollEndSpeedFactor', 'kneelWindow'],
+    Roll: ['rollDistance', 'rollTime', 'rollCooldown', 'rollEndSpeedFactor', 'rollTowardCursor', 'kneelWindow'],
     Shooting: ['hipSpreadDeg', 'boltTime', 'kneelChargeTime', 'inputBuffer'],
     'Hit feel': ['hitstopFrames', 'chargedHitstopFrames', 'knockback', 'selfKnockback', 'knockbackTime', 'finalShotSlowmo', 'finalShotSlowmoTime'],
     Match: ['maxHp', 'chargedDamage', 'roundsToWin'],
   };
-  const ints = new Set(['hitstopFrames', 'chargedHitstopFrames', 'maxHp', 'chargedDamage', 'roundsToWin']);
+  const ints = new Set(['rollTowardCursor', 'hitstopFrames', 'chargedHitstopFrames', 'maxHp', 'chargedDamage', 'roundsToWin']);
   for (const [name, keys] of Object.entries(groups)) {
     const f = gui.addFolder(name);
     for (const k of keys) {
