@@ -1,5 +1,5 @@
 import { config } from '../config';
-import { chargeTicksFor, gunUp, isCharged } from '../sim/sim';
+import { chargeProgress, gunUp, isCharged } from '../sim/sim';
 import type { GameState } from '../sim/types';
 import { AIM_HEIGHT, PLAYER_COLORS } from './scene';
 
@@ -114,9 +114,9 @@ export class AimCursor {
       g.arc(c.x, c.y, 1.8, 0, Math.PI * 2);
       g.fill();
 
-      // Charge ring around the crosshair while focusing.
-      if (p.ads && closed > 0.3) {
-        const frac = Math.min(1, p.adsTicks / chargeTicksFor(p));
+      // Empowered-shot charge ring around the crosshair (kneeling only).
+      if (p.ads && p.stance === 'kneel' && closed > 0.3) {
+        const frac = chargeProgress(p);
         const r = 15;
         g.globalAlpha = 0.25 * alpha;
         g.beginPath(); g.arc(c.x, c.y, r, 0, Math.PI * 2); g.stroke();

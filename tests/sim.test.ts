@@ -34,12 +34,36 @@ describe('shooting', () => {
     expect(g.players[1].hp).toBe(2);
   });
 
-  it('holding ADS for the charge time makes the shot deal 2 HP', () => {
+  it('standing focus never empowers the shot, however long it is held', () => {
     const g = playing();
-    const ev = run(g, T(config.chargeTime) + 1, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    const ev = run(g, T(2), (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    expect(ev.some((e) => e.type === 'charged')).toBe(false);
+    run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }));
+    expect(g.players[1].hp).toBe(2);
+  });
+
+  it('rolling into focus empowers the shot: 2 HP, and the shooter is kicked back out of the kneel', () => {
+    const g = playing();
+    run(g, 1, (g) => cmd({ moveZ: 1, roll: true, aim: aimAt(g, 0, 1) }));
+    run(g, T(config.rollTime) + 1, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    expect(g.players[0].stance).toBe('kneel');
+    const ev = run(g, T(config.kneelChargeTime) + 1, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
     expect(ev.some((e) => e.type === 'charged')).toBe(true);
+    const x0 = g.players[0].x;
     run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }));
     expect(g.players[1].hp).toBe(1);
+    expect(g.players[0].stance).toBe('normal');
+    run(g, config.chargedHitstopFrames + T(config.knockbackTime) + 2, () => cmd({ aim: 0 }));
+    // P1 starts on the left aiming right (+X), so the kick pushes toward -X.
+    expect(x0 - g.players[0].x).toBeGreaterThan(config.selfKnockback * 0.7);
+  });
+
+  it('aim keeps tracking while rolling', () => {
+    const g = playing();
+    run(g, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
+    run(g, 3, () => cmd({ aim: 1 }));
+    expect(g.players[0].stance).toBe('roll');
+    expect(g.players[0].aim).toBe(1);
   });
 
   it('the bolt cycle blocks a second shot until it finishes', () => {

@@ -46,11 +46,19 @@ function resetRound(state: GameState, cfg: Config) {
 export const hitRadius = (p: PlayerState, cfg: Config = defaultConfig) =>
   p.stance === 'kneel' ? cfg.kneelRadius : cfg.playerRadius;
 
-export const chargeTicksFor = (p: PlayerState, cfg: Config = defaultConfig) =>
-  secToTicks(p.stance === 'kneel' ? cfg.kneelChargeTime : cfg.chargeTime, cfg);
+/**
+ * The empowered (2 HP) shot only charges in a kneel, i.e. after rolling
+ * straight into focus. Standing focus is accurate but never empowered.
+ */
+export const chargeTicksFor = (_p: PlayerState, cfg: Config = defaultConfig) =>
+  secToTicks(cfg.kneelChargeTime, cfg);
+
+/** 0..1 progress of the empowered charge; 0 unless kneeling in focus. */
+export const chargeProgress = (p: PlayerState, cfg: Config = defaultConfig) =>
+  p.ads && p.stance === 'kneel' ? Math.min(1, p.adsTicks / Math.max(1, chargeTicksFor(p, cfg))) : 0;
 
 export const isCharged = (p: PlayerState, cfg: Config = defaultConfig) =>
-  p.ads && p.adsTicks >= chargeTicksFor(p, cfg);
+  p.ads && p.stance === 'kneel' && p.adsTicks >= chargeTicksFor(p, cfg);
 
 /** Can this player's gun fire or aim right now (ignoring the bolt)? */
 export const gunUp = (p: PlayerState) => p.stance !== 'roll' && p.stance !== 'sprint' && p.gunRaiseTicks === 0;
@@ -141,9 +149,10 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   const wantsAds = !!c?.ads;
 
   // Aim: explicit aim input wins. A gamepad with an idle right stick faces the move direction.
-  if (c && p.stance !== 'roll') {
+  // Aim keeps tracking during a roll (the flip is drawn along the roll direction).
+  if (c) {
     if (c.aimActive) p.aim = c.aim;
-    else if (moving && !wantsAds && p.stance !== 'kneel') p.aim = datan2(mz, mx);
+    else if (moving && !wantsAds && p.stance !== 'kneel' && p.stance !== 'roll') p.aim = datan2(mz, mx);
   }
 
   // Roll start (buffered press)
@@ -189,10 +198,10 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   const canAds = wantsAds && gunUp(p);
   if (canAds) {
     if (!p.ads) { p.ads = true; p.adsTicks = 0; }
-    const wasCharged = p.adsTicks >= chargeTicksFor(p, cfg);
+    const wasCharged = isCharged(p, cfg);
     // The charge only builds while the chamber is loaded.
     if (p.boltTicks === 0) p.adsTicks++;
-    if (!wasCharged && p.adsTicks >= chargeTicksFor(p, cfg)) state.events.push({ type: 'charged', player: p.id });
+    if (!wasCharged && isCharged(p, cfg)) state.events.push({ type: 'charged', player: p.id });
   } else {
     p.ads = false; p.adsTicks = 0;
   }
@@ -300,6 +309,15 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
 
   p.boltTicks = secToTicks(cfg.boltTime, cfg);
   p.adsTicks = 0; // the next charge starts over
+
+  // The empowered shot kicks the shooter back out of the kneel (Graves-style, short).
+  // To empower again you roll into focus again.
+  if (charged) {
+    p.stance = 'normal';
+    p.knockX = -dx * cfg.selfKnockback / cfg.knockbackTime;
+    p.knockZ = -dz * cfg.selfKnockback / cfg.knockbackTime;
+    p.knockTicks = secToTicks(cfg.knockbackTime, cfg);
+  }
 
   if (hit !== null) {
     const o = state.players[hit];

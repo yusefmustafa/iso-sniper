@@ -7,8 +7,8 @@ export function createTuningPanel(locked: () => boolean = () => false) {
   const groups: Record<string, (keyof typeof config)[]> = {
     Movement: ['walkSpeed', 'sprintSpeed', 'adsSpeed', 'accelTime', 'stopTime', 'sprintRampTime', 'gunRaiseTime'],
     Roll: ['rollDistance', 'rollTime', 'rollCooldown', 'rollEndSpeedFactor', 'kneelWindow'],
-    Shooting: ['hipSpreadDeg', 'boltTime', 'chargeTime', 'kneelChargeTime', 'inputBuffer'],
-    'Hit feel': ['hitstopFrames', 'chargedHitstopFrames', 'knockback', 'knockbackTime', 'finalShotSlowmo', 'finalShotSlowmoTime'],
+    Shooting: ['hipSpreadDeg', 'boltTime', 'kneelChargeTime', 'inputBuffer'],
+    'Hit feel': ['hitstopFrames', 'chargedHitstopFrames', 'knockback', 'selfKnockback', 'knockbackTime', 'finalShotSlowmo', 'finalShotSlowmoTime'],
     Match: ['maxHp', 'chargedDamage', 'roundsToWin'],
   };
   const ints = new Set(['hitstopFrames', 'chargedHitstopFrames', 'maxHp', 'chargedDamage', 'roundsToWin']);

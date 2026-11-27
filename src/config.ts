@@ -33,8 +33,7 @@ export const config = {
   // Shooting
   hipSpreadDeg: 8, // full cone width (the cone cursor shows it)
   boltTime: 1.2,
-  chargeTime: 0.75,
-  kneelChargeTime: 0.5,
+  kneelChargeTime: 0.5, // empowered shot charge; only charges while kneeling (roll into focus)
   shotRange: 60,
   inputBuffer: 0.12,
 
@@ -42,6 +41,7 @@ export const config = {
   hitstopFrames: 4,
   chargedHitstopFrames: 8,
   knockback: 1.5, // meters of push on hit
+  selfKnockback: 0.8, // meters the shooter is kicked back by an empowered shot
   knockbackTime: 0.15,
 
   // Round flow
