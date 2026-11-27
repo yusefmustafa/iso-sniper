@@ -75,18 +75,24 @@ export class AimCursor {
       const alpha = ready ? 1 : 0.35;
       const half = (config.hipSpreadDeg / 2) * DEG * open;
       const start = 0.7; // start the cone just past the muzzle
-      // Settings: end the cone at the cursor, or run it on to the wall the shot would reach.
+      // Settings: end the cone at the cursor, or project it the whole way out. Projected, every
+      // ray of the cone runs to where a shot along it would stop (or through walls to max range),
+      // so the far edge follows the cover instead of ending in a cap.
       const full = settings.coneLength === 'full';
-      const coneEnd = full ? Math.max(MIN_REACH, rayToWorld(state.arena, pos.x, pos.z, Math.cos(p.aim), Math.sin(p.aim), config.shotRange)) : reach;
+      const clip = settings.coneWalls === 'stop';
+      const rayEnd = (ang: number) => !full ? reach
+        : clip ? Math.max(start, rayToWorld(state.arena, pos.x, pos.z, Math.cos(ang), Math.sin(ang), config.shotRange))
+        : config.shotRange;
 
-      // Cone: two edges and an arc at its far end.
+      // Cone: two edges and its far end.
       if (open > 0.02) {
-        const steps = 12;
+        const steps = full ? 48 : 12;
         g.beginPath();
         const a = at(p.aim - half, start);
         g.moveTo(a.x, a.y);
         for (let s = 0; s <= steps; s++) {
-          const q = at(p.aim - half + (2 * half * s) / steps, coneEnd);
+          const ang = p.aim - half + (2 * half * s) / steps;
+          const q = at(ang, rayEnd(ang));
           g.lineTo(q.x, q.y);
         }
         const b = at(p.aim + half, start);

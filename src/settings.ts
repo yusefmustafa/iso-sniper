@@ -5,6 +5,8 @@
 export interface Settings {
   /** 'cursor': the hip-fire cone ends at the cursor. 'full': it runs on to the first wall, as the bullet does. */
   coneLength: 'cursor' | 'full';
+  /** With the full cone: stop each ray at the first wall/cover, or draw through to max range. */
+  coneWalls: 'stop' | 'through';
   /** Where the body faces while sprinting: snaps to the run direction, turns toward it, or keeps facing the cursor. */
   sprintFacing: 'snap' | 'turn' | 'aim';
   /** How the rifle is carried while sprinting. */
@@ -16,8 +18,8 @@ export interface Settings {
   rollDirection: 'move' | 'cursor';
 }
 
-const KEY = 'iso-sniper:settings';
-const defaults: Settings = { coneLength: 'cursor', sprintFacing: 'turn', sprintCarry: 'port', rollDirection: 'move' };
+const KEY = 'iso-sniper:settings:v2'; // v2: the full cone became the default
+const defaults: Settings = { coneLength: 'full', coneWalls: 'stop', sprintFacing: 'turn', sprintCarry: 'port', rollDirection: 'move' };
 
 function load(): Settings {
   try {
@@ -39,7 +41,12 @@ const choices: Choice<keyof Settings>[] = [
   {
     key: 'coneLength', label: 'Hip-fire cone',
     hint: 'Hip shots can land anywhere inside the cone, all the way to the wall.',
-    options: [{ value: 'cursor', label: 'Stop at cursor' }, { value: 'full', label: 'Full range' }],
+    options: [{ value: 'full', label: 'Full range' }, { value: 'cursor', label: 'Stop at cursor' }],
+  },
+  {
+    key: 'coneWalls', label: 'Full cone at walls', dev: true,
+    hint: 'Stop each edge where a shot would stop, or draw through cover to max range.',
+    options: [{ value: 'stop', label: 'Stop at walls' }, { value: 'through', label: 'Through walls' }],
   },
   {
     key: 'rollDirection', label: 'Roll direction', dev: true,
