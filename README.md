@@ -1,6 +1,6 @@
 # Iso Snipers
 
-An isometric 1v1 sniper duel. Couch play first (keyboard + mouse and controllers at the same time), online later.
+An isometric 1v1 sniper duel, played online in the browser. Create a match, send the link, your friend clicks it and you duel.
 
 ## Run it
 
@@ -10,6 +10,13 @@ npm run dev      # http://localhost:5173
 npm test         # simulation tests
 npm run build    # static build in dist/, host anywhere
 ```
+
+To try online play on one machine, open two tabs at `http://localhost:5173/?net=local`
+(BroadcastChannel instead of WebRTC). Real WebRTC between two isolated browsers:
+`npm run relay` (local signaling relay) and `npm run smoke:online` with the dev server running.
+
+Pushing to `main` deploys to GitHub Pages (`.github/workflows/pages.yml`). Turn it on once
+under the repo's Settings > Pages > Source: GitHub Actions.
 
 ## Controls
 
@@ -21,12 +28,12 @@ npm run build    # static build in dist/, host anywhere
 | Shoot | Left click | RT / R2 |
 | Sprint | Hold Shift | Hold LB / L1 (or click L3) |
 | Roll | Space | A / Cross |
-| Rematch / practice vs dummy | Enter | Start |
+| Rematch | Enter | Start |
 | Fullscreen | F | |
-| Free the mouse (it is captured while you play) | Esc | |
-| Tuning panel | ` | |
+| Free the mouse (it is captured while you play); then click Leave match to quit | Esc | |
+| Tuning panel (practice only) | ` | |
 
-Press any button on a device to join. With one player joined, press Enter or Start to practice against a dummy.
+Keyboard + mouse and controllers both work; whichever you touched last drives your player. Practice vs dummy is on the front screen.
 
 ## Rules (first playable)
 
@@ -38,6 +45,25 @@ Press any button on a device to join. With one player joined, press Enter or Sta
 
 All numbers live in `src/config.ts` and can be changed live from the tuning panel.
 
+## Online play
+
+Peer-to-peer rollback netcode, no game server:
+
+- **Finding each other:** the match link is `…/#<room>`. [Trystero](https://github.com/dmotz/trystero) uses public
+  Nostr relays to exchange WebRTC offers, then the two browsers talk directly. Hosting is a static site, cost $0.
+- **Rollback:** both browsers run the full sim. Your input applies after a 2-frame delay (33 ms, `?delay=N`
+  to change). The opponent's input is predicted (they keep doing what they last did); when their real input
+  arrives and differs, the sim rewinds to that frame and replays to now. Up to 8 frames of prediction, then it waits.
+- **Shots:** hitscan is resolved inside the sim on the frame it was fired, so the shooter's laser is the truth.
+- **Time sync:** the peer that runs ahead skips a tick now and then so neither side rolls back more than needed.
+- **Determinism:** the sim uses its own sin/cos/atan2 (`sim/dmath.ts`) so Chrome, Firefox and Safari compute
+  identical bits, and inputs are quantized to small integers on the wire. Every 60 frames the peers compare a
+  state hash; a mismatch shows a DESYNC warning in the corner.
+- **Smoothing:** a rollback correction to a player's position is blended out over ~60 ms instead of snapping.
+- **Tuning:** the host's tuning values are sent at match start; the panel is locked during online matches.
+- **Limits:** no TURN relay yet, so a few strict networks (some corporate or mobile carriers) can't connect directly.
+  P2P means no cheat protection; fine for playing with friends.
+
 ## Code layout
 
 ```
@@ -47,11 +73,18 @@ src/
     sim.ts           step(state, commands) at a fixed 60 ticks per second
     arena.ts         layout, collision, raycasts
     types.ts         plain-data state and the per-tick Command
-  input/             devices -> Command (keyboard+mouse, gamepads, join order)
+    dmath.ts         deterministic trig for cross-browser lockstep
+  net/               online play
+    rollback.ts      rollback session: prediction, rewind/replay, time sync, desync check
+    webrtc.ts        Trystero + WebRTC transport (reliable handshake, unreliable input channel)
+    handshake.ts     who is P1, seed and config exchange
+    channel.ts       transport interface, BroadcastChannel and fake-latency transports
+    codec.ts         Command <-> small integers on the wire
+  input/             devices -> Command (keyboard+mouse, gamepads)
   render/            Three.js scene, HUD, placeholder WebAudio sounds; reads state only
   dev/tuning.ts      live tuning panel
-tests/sim.test.ts    rules and determinism tests
+tests/               rules, determinism and rollback tests (80 ms latency, jitter, 10% loss)
+tools/               local Nostr relay and a two-browser WebRTC smoke test
 ```
 
-The simulation never reads a device or a clock. Online play adds a network input
-source and a server running the same `sim/` code.
+The simulation never reads a device or a clock, which is what makes rollback possible.

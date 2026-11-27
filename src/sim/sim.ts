@@ -1,5 +1,6 @@
 import { config as defaultConfig, type Config } from '../config';
 import { defaultArena, rayToCircle, rayToWorld, resolveCircle } from './arena';
+import { datan2, dcos, dhypot, dsin } from './dmath';
 import { nextRandom } from './rng';
 import type { Command, GameState, PlayerState } from './types';
 
@@ -88,7 +89,7 @@ export function step(state: GameState, commands: Command[], cfg: Config = defaul
       return;
     }
     case 'roundEnd': {
-      state.phaseTicks--;
+      state.phaseTicks -= timeScale(state, cfg);
       state.players.forEach((p) => integrate(state, p, cfg, true));
       if (state.phaseTicks <= 0) {
         state.round++;
@@ -98,6 +99,9 @@ export function step(state: GameState, commands: Command[], cfg: Config = defaul
     }
     case 'matchEnd':
       state.players.forEach((p) => integrate(state, p, cfg, true));
+      // Either player can call the rematch. It goes through the sim so both
+      // machines restart on the same tick.
+      if (state.slowmoTicks === 0 && commands.some((c) => c?.start)) restartMatch(state, cfg);
       return;
     case 'playing':
       break;
@@ -131,7 +135,7 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
 
   // Move input, clamped to the unit circle
   let mx = c?.moveX ?? 0, mz = c?.moveZ ?? 0;
-  const mlen = Math.hypot(mx, mz);
+  const mlen = dhypot(mx, mz);
   if (mlen > 1) { mx /= mlen; mz /= mlen; }
   const moving = mlen > 0.15;
   const wantsAds = !!c?.ads;
@@ -139,15 +143,15 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   // Aim: explicit aim input wins. A gamepad with an idle right stick faces the move direction.
   if (c && p.stance !== 'roll') {
     if (c.aimActive) p.aim = c.aim;
-    else if (moving && !wantsAds && p.stance !== 'kneel') p.aim = Math.atan2(mz, mx);
+    else if (moving && !wantsAds && p.stance !== 'kneel') p.aim = datan2(mz, mx);
   }
 
   // Roll start (buffered press)
   if (p.rollBuffer > 0 && p.rollCooldownTicks === 0 && p.stance !== 'roll') {
     p.rollBuffer = 0;
-    const dx = moving ? mx / Math.max(mlen, 1e-6) : Math.cos(p.aim);
-    const dz = moving ? mz / Math.max(mlen, 1e-6) : Math.sin(p.aim);
-    const n = Math.hypot(dx, dz) || 1;
+    const dx = moving ? mx / Math.max(mlen, 1e-6) : dcos(p.aim);
+    const dz = moving ? mz / Math.max(mlen, 1e-6) : dsin(p.aim);
+    const n = dhypot(dx, dz) || 1;
     p.rollDirX = dx / n; p.rollDirZ = dz / n;
     p.stance = 'roll';
     p.rollTicks = secToTicks(cfg.rollTime, cfg);
@@ -218,10 +222,10 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
     p.rollTicks--;
   } else {
     const tx = mx * speed, tz = mz * speed;
-    const accelerating = tx * p.vx + tz * p.vz >= 0 && Math.hypot(tx, tz) > 1e-6;
+    const accelerating = tx * p.vx + tz * p.vz >= 0 && dhypot(tx, tz) > 1e-6;
     const rate = (accelerating ? cfg.walkSpeed / cfg.accelTime : cfg.walkSpeed / cfg.stopTime) * dt;
     const dx = tx - p.vx, dz = tz - p.vz;
-    const dl = Math.hypot(dx, dz);
+    const dl = dhypot(dx, dz);
     if (dl <= rate) { p.vx = tx; p.vz = tz; }
     else { p.vx += (dx / dl) * rate; p.vz += (dz / dl) * rate; }
   }
@@ -229,18 +233,27 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   integrate(state, p, cfg, false);
 }
 
+/**
+ * Slow motion after a round-winning shot. Ticks keep their real-time pace (both
+ * online peers must tick at the same rate), so slow motion shrinks the time step
+ * instead of slowing the tick loop.
+ */
+export const timeScale = (state: GameState, cfg: Config = defaultConfig) =>
+  state.slowmoTicks > 0 ? cfg.finalShotSlowmo : 1;
+
 function integrate(state: GameState, p: PlayerState, cfg: Config, frictionOnly: boolean) {
-  const dt = 1 / cfg.tickRate;
+  const scale = timeScale(state, cfg);
+  const dt = scale / cfg.tickRate;
   if (frictionOnly) {
     // Outside of play, players slide to a stop but keep their knockback.
-    const k = Math.max(0, 1 - (cfg.walkSpeed / cfg.stopTime) * dt / Math.max(Math.hypot(p.vx, p.vz), 1e-6));
+    const k = Math.max(0, 1 - (cfg.walkSpeed / cfg.stopTime) * dt / Math.max(dhypot(p.vx, p.vz), 1e-6));
     p.vx *= k; p.vz *= k;
   }
   let kx = 0, kz = 0;
   if (p.knockTicks > 0) {
     const f = p.knockTicks / secToTicks(cfg.knockbackTime, cfg);
     kx = p.knockX * f * 2; kz = p.knockZ * f * 2; // linear decay, integrates to the knockback distance
-    p.knockTicks--;
+    p.knockTicks = Math.max(0, p.knockTicks - scale);
   }
   p.x += (p.vx + kx) * dt;
   p.z += (p.vz + kz) * dt;
@@ -251,7 +264,7 @@ function separatePlayers(state: GameState, cfg: Config) {
   const [a, b] = state.players;
   const ra = hitRadius(a, cfg), rb = hitRadius(b, cfg);
   const dx = b.x - a.x, dz = b.z - a.z;
-  const d = Math.hypot(dx, dz);
+  const d = dhypot(dx, dz);
   const min = ra + rb;
   if (d >= min || d < 1e-6) return;
   const push = (min - d) / 2;
@@ -267,9 +280,9 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
   // Hip-fire spreads randomly inside the cone; an aimed shot goes exactly down the laser.
   const spread = aimed ? 0 : (nextRandom(state) - 0.5) * cfg.hipSpreadDeg * DEG;
   const ang = p.aim + spread;
-  const dx = Math.cos(ang), dz = Math.sin(ang);
-  const ox = p.x + Math.cos(p.aim) * MUZZLE_OFFSET * 0.5;
-  const oz = p.z + Math.sin(p.aim) * MUZZLE_OFFSET * 0.5;
+  const dx = dcos(ang), dz = dsin(ang);
+  const ox = p.x + dcos(p.aim) * MUZZLE_OFFSET * 0.5;
+  const oz = p.z + dsin(p.aim) * MUZZLE_OFFSET * 0.5;
 
   const wallDist = rayToWorld(state.arena, ox, oz, dx, dz, cfg.shotRange);
   let hit: number | null = null;
@@ -303,7 +316,8 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
 
     if (o.hp === 0) {
       state.score[p.id]++;
-      state.slowmoTicks = secToTicks(cfg.finalShotSlowmoTime, cfg);
+      // finalShotSlowmoTime is game time; in real time it lasts 1/finalShotSlowmo longer.
+      state.slowmoTicks = secToTicks(cfg.finalShotSlowmoTime / cfg.finalShotSlowmo, cfg);
       state.events.push({ type: 'roundWon', player: p.id, score: [...state.score] });
       if (state.score[p.id] >= cfg.roundsToWin) {
         state.phase = 'matchEnd';

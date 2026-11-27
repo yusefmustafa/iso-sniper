@@ -1,8 +1,8 @@
 import GUI from 'lil-gui';
 import { config } from '../config';
 
-/** Live tuning panel (press ` to toggle). Every number in config.ts, changeable mid-match. */
-export function createTuningPanel() {
+/** Live tuning panel (press ` to toggle). Every number in config.ts, changeable mid-match. Locked during online matches. */
+export function createTuningPanel(locked: () => boolean = () => false) {
   const gui = new GUI({ title: 'Tuning (`)' });
   const groups: Record<string, (keyof typeof config)[]> = {
     Movement: ['walkSpeed', 'sprintSpeed', 'adsSpeed', 'accelTime', 'stopTime', 'sprintRampTime', 'gunRaiseTime'],
@@ -24,7 +24,7 @@ export function createTuningPanel() {
   gui.add({ copy: () => navigator.clipboard?.writeText(JSON.stringify(config, null, 2)) }, 'copy').name('Copy values as JSON');
   gui.hide();
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Backquote') gui.show(gui._hidden);
+    if (e.code === 'Backquote' && !locked()) gui.show(gui._hidden);
   });
   return gui;
 }

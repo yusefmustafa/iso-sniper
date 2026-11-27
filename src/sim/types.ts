@@ -13,11 +13,12 @@ export interface Command {
   ads: boolean;
   fire: boolean; // held state; the sim detects presses
   roll: boolean; // held state; the sim detects presses
+  start: boolean; // rematch request at the end of a match
 }
 
 export const emptyCommand = (): Command => ({
   moveX: 0, moveZ: 0, aim: 0, aimActive: false,
-  sprint: false, ads: false, fire: false, roll: false,
+  sprint: false, ads: false, fire: false, roll: false, start: false,
 });
 
 export type Stance = 'normal' | 'sprint' | 'roll' | 'kneel';
@@ -44,7 +45,7 @@ export interface PlayerState {
   rollBuffer: number; // ticks left on a buffered roll press
   knockX: number; // knockback velocity
   knockZ: number;
-  knockTicks: number;
+  knockTicks: number; // fractional during slow motion
   sprintRamp: number; // 0..1
   prevFire: boolean;
   prevRoll: boolean;
@@ -84,7 +85,7 @@ export interface GameState {
   tick: number;
   seed: number; // RNG state, advanced deterministically
   phase: Phase;
-  phaseTicks: number; // ticks left in the current timed phase
+  phaseTicks: number; // ticks left in the current timed phase (fractional during slow motion)
   round: number;
   score: number[];
   hitstop: number; // ticks the whole sim is frozen for impact

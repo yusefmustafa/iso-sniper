@@ -116,7 +116,7 @@ describe('rounds', () => {
     if (g.players[1].hp === 0) {
       expect(g.score[0]).toBe(1);
       expect(g.phase).toBe('roundEnd');
-      run(g, T(config.roundEndTime) + config.chargedHitstopFrames + 2, () => cmd());
+      run(g, T(config.roundEndTime) + T(config.finalShotSlowmoTime / config.finalShotSlowmo) + config.chargedHitstopFrames + 2, () => cmd());
       expect(g.phase).toBe('countdown');
       expect(g.players[1].hp).toBe(config.maxHp);
     }
