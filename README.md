@@ -1,4 +1,4 @@
-# SnipeFight
+# Snipefight
 
 An isometric 1v1 sniper duel, played online in the browser. Create a match, send the link, your friend clicks it and you duel.
 
