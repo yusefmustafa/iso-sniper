@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { config } from '../config';
 import { rayToCircle, rayToWorld } from '../sim/arena';
-import { chargeTicksFor, hitRadius, isCharged, MUZZLE_OFFSET, secToTicks } from '../sim/sim';
+import { chargeProgress, hitRadius, isCharged, secToTicks } from '../sim/sim';
 import type { GameState, PlayerState, SimEvent } from '../sim/types';
+import { Character, makeGlintTexture, SHOULDER_HEIGHT } from './character';
+import { DeathFx } from './death';
 
 /**
  * The renderer only reads game state and sim events. It never changes the
@@ -10,32 +12,20 @@ import type { GameState, PlayerState, SimEvent } from '../sim/types';
  */
 
 export const PLAYER_COLORS = [0xff8a3d, 0x3dd6ff];
-export const AIM_HEIGHT = 1.15;
+export const AIM_HEIGHT = SHOULDER_HEIGHT; // rifle height: lasers, tracers and the mouse aim plane
 const CAM_OFFSET = new THREE.Vector3(20, 24, 20);
 
 interface PlayerView {
-  root: THREE.Group; // positioned and rotated to aim
-  body: THREE.Group; // animated (lean, roll, kneel)
-  torso: THREE.Mesh;
-  head: THREE.Mesh;
-  gun: THREE.Group;
-  legs: THREE.Group[]; // [left, right], pivoting at the hip
-  materials: THREE.MeshStandardMaterial[];
+  char: Character; // body, rifle and animation
   laserOuter: THREE.Mesh;
   laserCore: THREE.Mesh;
   ring: THREE.Mesh;
-  flash: number; // seconds of white hit flash left
-  recoil: number; // 0..1
-  rollSpin: number;
-  bob: number;
-  lean: THREE.Vector2;
-  kneel: number; // 0..1 smoothed
-  gunDown: number; // 0..1 smoothed
-  walk: number; // 0..1 smoothed stride amount
-  stepDir: THREE.Vector2; // smoothed move direction in the character's frame
+  alive: boolean; // last frame's state, to catch the moment of death
+  hitDir: { x: number; z: number }; // direction of the last shot that hit, to throw the debris
 }
 
-const HIP_HEIGHT = 0.42;
+const MUZZLE_REACH = 1.68; // muzzle distance in front of the character, for the laser
+const MUZZLE_SIDE = 0.13; // muzzle offset to the character's right
 
 interface Tracer { mesh: THREE.Mesh; life: number; max: number }
 interface Spark { mesh: THREE.Mesh; vel: THREE.Vector3; life: number }
@@ -57,6 +47,8 @@ export class GameRenderer {
   private raycaster = new THREE.Raycaster();
   private aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -AIM_HEIGHT);
   private time = 0;
+  private glintTexture: THREE.Texture | null = null;
+  private deaths = new DeathFx(this.scene);
   /** Interpolated player positions from the last render, for overlays. */
   positions: { x: number; z: number }[] = [];
   private arenaBuilt = false;
@@ -189,61 +181,9 @@ export class GameRenderer {
 
   private buildPlayer(i: number): PlayerView {
     const color = new THREE.Color(PLAYER_COLORS[i]);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd9dde4, roughness: 0.5, metalness: 0.2, emissive: color, emissiveIntensity: 0.25 });
-    const accentMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.3, emissive: color, emissiveIntensity: 0.6 });
-    const gunMat = new THREE.MeshStandardMaterial({ color: 0x23262d, roughness: 0.6, metalness: 0.6 });
-
-    const root = new THREE.Group();
-    const body = new THREE.Group();
-    root.add(body);
-
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.5, 6, 16), bodyMat);
-    torso.position.y = 0.85;
-    torso.castShadow = true;
-    body.add(torso);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 20, 16), bodyMat);
-    head.position.y = 1.5;
-    head.castShadow = true;
-    body.add(head);
-
-    // Legs and boots. Each leg pivots at the hip so walking can swing it.
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.7, metalness: 0.1 });
-    const legs: THREE.Group[] = [];
-    for (const side of [-1, 1]) {
-      const leg = new THREE.Group();
-      leg.position.set(0, HIP_HEIGHT, side * 0.16);
-      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.09, HIP_HEIGHT - 0.06, 10), legMat);
-      thigh.position.y = -(HIP_HEIGHT - 0.06) / 2;
-      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.11, 0.17), accentMat);
-      boot.position.set(0.06, -HIP_HEIGHT + 0.055, 0);
-      for (const m of [thigh, boot]) { m.castShadow = true; leg.add(m); }
-      body.add(leg);
-      legs.push(leg);
-    }
-
-    // Visor shows facing at a glance
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.34), accentMat);
-    visor.position.set(0.2, 1.52, 0);
-    body.add(visor);
-
-    // Shoulder band in the player color
-    const band = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.05, 8, 24), accentMat);
-    band.rotation.x = Math.PI / 2;
-    band.position.y = 1.08;
-    body.add(band);
-
-    // Rifle: pivot at the shoulder, barrel along +X
-    const gun = new THREE.Group();
-    gun.position.set(0.1, AIM_HEIGHT, 0.18);
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.08), gunMat);
-    stock.position.x = 0.15;
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.05, 0.05), gunMat);
-    barrel.position.x = 0.72;
-    const scope = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.07, 0.07), accentMat);
-    scope.position.set(0.32, 0.1, 0);
-    for (const m of [stock, barrel, scope]) { m.castShadow = true; gun.add(m); }
-    body.add(gun);
+    this.glintTexture ??= makeGlintTexture();
+    const char = new Character(PLAYER_COLORS[i], this.glintTexture);
+    const root = char.root;
 
     // Lasers live in world space (not under root) so they can be any length.
     const laserOuter = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
@@ -264,11 +204,7 @@ export class GameRenderer {
     root.add(glow);
 
     this.scene.add(root);
-    return {
-      root, body, torso, head, gun, legs, materials: [bodyMat, accentMat], laserOuter, laserCore, ring,
-      flash: 0, recoil: 0, rollSpin: 0, bob: 0, lean: new THREE.Vector2(), kneel: 0, gunDown: 0,
-      walk: 0, stepDir: new THREE.Vector2(1, 0),
-    };
+    return { char, laserOuter, laserCore, ring, alive: true, hitDir: { x: 1, z: 0 } };
   }
 
   /** React to sim events with one-off effects. */
@@ -276,16 +212,21 @@ export class GameRenderer {
     for (const e of events) {
       if (e.type === 'shot') {
         this.spawnTracer(e.fromX, e.fromZ, e.toX, e.toZ, e.charged, e.player);
-        this.views[e.player].recoil = 1;
+        this.views[e.player].char.recoil = e.charged ? 1.6 : 1;
         this.muzzleLight.position.set(e.fromX, AIM_HEIGHT + 0.2, e.fromZ);
         this.muzzleLight.intensity = e.charged ? 40 : 25;
         this.addTrauma(e.charged ? 0.35 : 0.2);
-        this.spawnSparks(e.toX, e.toZ, e.hit !== null ? PLAYER_COLORS[e.hit] : 0xffe2b0, e.hit !== null ? 14 : 8);
+        // A shot into an invulnerable player stops in a burst of white: no damage.
+        this.spawnSparks(e.toX, e.toZ, e.blocked ? 0xffffff : e.hit !== null ? PLAYER_COLORS[e.hit] : 0xffe2b0, e.hit !== null ? 14 : 8);
       } else if (e.type === 'hit') {
-        this.views[e.player].flash = 0.12;
+        this.views[e.player].char.flash = 0.12;
+        this.views[e.player].hitDir = { x: e.dirX, z: e.dirZ };
         this.addTrauma(e.damage > 1 ? 0.8 : 0.5);
+      } else if (e.type === 'charged') {
+        this.views[e.player].char.glintBurst = 1;
       } else if (e.type === 'roundStart') {
         this.camVel.set(0, 0, 0);
+        this.deaths.clear();
       }
     }
     void state;
@@ -337,85 +278,22 @@ export class GameRenderer {
   }
 
   private updatePlayerView(state: GameState, p: PlayerState, v: PlayerView, pos: { x: number; z: number }, dt: number, frozen: boolean) {
-    const k = (rate: number) => 1 - Math.exp(-rate * dt); // framerate-independent smoothing
-    v.root.position.set(pos.x, 0, pos.z);
-    v.root.rotation.y = -p.aim;
-
-    const speed = Math.hypot(p.vx, p.vz);
+    v.char.root.position.set(pos.x, 0, pos.z);
+    // Death: the body is replaced by the explosion until the next round. Driven by hp (not the
+    // event), so a rollback correction can't leave a stale body or a double explosion behind.
+    const alive = p.hp > 0;
+    if (v.alive && !alive) this.deaths.spawn(pos.x, pos.z, PLAYER_COLORS[p.id], v.hitDir.x, v.hitDir.z);
+    v.alive = alive;
+    v.char.root.visible = alive;
+    v.char.update(p, dt, frozen, this.time);
     const fwdX = Math.cos(p.aim), fwdZ = Math.sin(p.aim);
-    // Velocity in the character's local frame, for leaning into movement.
-    const localFwd = (p.vx * fwdX + p.vz * fwdZ) / config.sprintSpeed;
-    const localSide = (-p.vx * fwdZ + p.vz * fwdX) / config.sprintSpeed;
-
-    if (!frozen) {
-      v.lean.x += (localFwd * 0.28 - v.lean.x) * k(14);
-      v.lean.y += (localSide * 0.28 - v.lean.y) * k(14);
-      v.bob += dt * (6 + speed * 1.6) * (speed > 0.3 ? 1 : 0);
-      v.kneel += ((p.stance === 'kneel' ? 1 : 0) - v.kneel) * k(22);
-      v.gunDown += ((p.stance === 'sprint' || p.stance === 'roll' || p.gunRaiseTicks > 0 ? 1 : 0) - v.gunDown) * k(18);
-      v.recoil = Math.max(0, v.recoil - dt * 6);
-      const moving = speed > 0.3 && p.stance !== 'roll';
-      v.walk += ((moving ? Math.min(1, speed / config.walkSpeed) : 0) - v.walk) * k(12);
-      if (moving) {
-        const n = Math.hypot(localFwd, localSide) || 1;
-        v.stepDir.x += (localFwd / n - v.stepDir.x) * k(16);
-        v.stepDir.y += (localSide / n - v.stepDir.y) * k(16);
-      }
-    }
-
-    // Legs: swing along the move direction, opposite each other, lifting on the forward swing.
-    // Kneeling plants one knee forward.
-    v.legs.forEach((leg, side) => {
-      const sign = side === 0 ? 1 : -1;
-      const phase = Math.sin(v.bob) * sign;
-      const lift = Math.max(0, Math.cos(v.bob) * sign);
-      const swing = phase * 0.55 * v.walk + (side === 0 ? 0.7 : -0.25) * v.kneel;
-      const dir = v.kneel > 0.5 ? { x: 1, y: 0 } : v.stepDir;
-      leg.rotation.set(-swing * dir.y, 0, swing * dir.x);
-      leg.position.y = HIP_HEIGHT + lift * 0.06 * v.walk;
-    });
-
-    // Roll: a full forward flip around the roll direction, with a squash at the start.
-    if (p.stance === 'roll') {
-      const total = secToTicks(config.rollTime);
-      const t = 1 - p.rollTicks / total;
-      v.rollSpin = t * Math.PI * 2;
-    } else {
-      v.rollSpin += (0 - v.rollSpin) * k(30);
-    }
-    const rollDirLocalFwd = p.rollDirX * fwdX + p.rollDirZ * fwdZ;
-    const rollDirLocalSide = -p.rollDirX * fwdZ + p.rollDirZ * fwdX;
-
-    v.body.rotation.set(0, 0, 0);
-    // Lean: rotate around local Z for forward/back, X for sideways.
-    v.body.rotation.z = -v.lean.x;
-    v.body.rotation.x = v.lean.y;
-    if (p.stance === 'roll' || v.rollSpin > 0.01) {
-      v.body.rotation.z += -v.rollSpin * rollDirLocalFwd;
-      v.body.rotation.x += v.rollSpin * rollDirLocalSide;
-    }
-    const bobY = speed > 0.3 && p.stance !== 'roll' ? Math.abs(Math.sin(v.bob)) * 0.06 : 0;
-    const squash = p.stance === 'roll' ? 0.72 : 1;
-    v.body.scale.set(1, (1 - v.kneel * 0.32) * squash, 1);
-    v.body.position.y = bobY + (p.stance === 'roll' ? 0.25 : 0);
-
-    // Gun: lowered when sprinting/rolling, kicked back on recoil, raised slightly in ADS.
-    v.gun.rotation.z = -v.gunDown * 0.9 + v.recoil * 0.25;
-    v.gun.position.x = 0.1 - v.recoil * 0.18;
-    v.gun.position.y = AIM_HEIGHT + (p.ads ? 0.05 : 0);
-
-    // Hit flash
-    v.flash = Math.max(0, v.flash - (frozen ? dt * 0.3 : dt));
-    for (const m of v.materials) {
-      m.emissiveIntensity = v.flash > 0 ? 3 : m === v.materials[0] ? 0.25 : 0.6;
-      if (v.flash > 0) m.emissive.setHex(0xffffff); else m.emissive.setHex(PLAYER_COLORS[p.id]);
-    }
 
     // Laser: from the muzzle to the first wall or player along the aim.
-    const showLaser = p.ads && state.phase !== 'countdown';
+    const showLaser = alive && p.ads && state.phase !== 'countdown';
     v.laserOuter.visible = v.laserCore.visible = showLaser;
     if (showLaser) {
-      const ox = pos.x + fwdX * MUZZLE_OFFSET * 1.6, oz = pos.z + fwdZ * MUZZLE_OFFSET * 1.6;
+      // The rifle sits on the right shoulder, so the laser starts a little right of center.
+      const ox = pos.x + fwdX * MUZZLE_REACH - fwdZ * MUZZLE_SIDE, oz = pos.z + fwdZ * MUZZLE_REACH + fwdX * MUZZLE_SIDE;
       let dist = rayToWorld(state.arena, ox, oz, fwdX, fwdZ, config.shotRange);
       for (const o of state.players) {
         if (o.id === p.id) continue;
@@ -423,12 +301,12 @@ export class GameRenderer {
       }
       const charged = isCharged(p);
       const pulse = charged ? 1 + Math.sin(this.time * 30) * 0.25 : 1;
-      const progress = Math.min(1, p.adsTicks / chargeTicksFor(p));
+      const progress = chargeProgress(p);
       const outerW = (charged ? 0.16 : 0.07 + progress * 0.04) * pulse;
       const coreW = charged ? 0.05 : 0.025;
       for (const [m, w] of [[v.laserOuter, outerW], [v.laserCore, coreW]] as const) {
         m.scale.set(dist, w, w);
-        m.position.set(ox + fwdX * dist / 2, AIM_HEIGHT + 0.05, oz + fwdZ * dist / 2);
+        m.position.set(ox + fwdX * dist / 2, AIM_HEIGHT, oz + fwdZ * dist / 2);
         m.rotation.y = -p.aim;
       }
       (v.laserOuter.material as THREE.MeshBasicMaterial).opacity = charged ? 0.85 : 0.4 + progress * 0.3;
@@ -440,12 +318,12 @@ export class GameRenderer {
     if (p.boltTicks > 0) {
       frac = 1 - p.boltTicks / secToTicks(config.boltTime);
       ringMat.color.setHex(0x8b909b);
-    } else if (p.ads) {
-      frac = Math.min(1, p.adsTicks / chargeTicksFor(p));
+    } else if (p.ads && p.stance === 'kneel') {
+      frac = chargeProgress(p);
       ringMat.color.setHex(isCharged(p) ? 0xffffff : PLAYER_COLORS[p.id]);
     }
     v.ring.geometry = this.ringGeoms[Math.round(frac * 32)];
-    v.ring.visible = frac > 0;
+    v.ring.visible = alive && frac > 0;
   }
 
   private updateCamera(state: GameState, pos: { x: number; z: number }[], dt: number) {
@@ -496,6 +374,7 @@ export class GameRenderer {
   }
 
   private updateEffects(dt: number) {
+    this.deaths.update(dt);
     this.muzzleLight.intensity = Math.max(0, this.muzzleLight.intensity - dt * 300);
     this.tracers = this.tracers.filter((t) => {
       t.life -= dt;

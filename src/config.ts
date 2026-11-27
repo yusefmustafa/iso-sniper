@@ -24,17 +24,17 @@ export const config = {
   kneelRadius: 0.3,
 
   // Roll
-  rollDistance: 6,
-  rollTime: 0.4,
+  rollDistance: 5,
+  rollTime: 0.45,
   rollCooldown: 1.0,
-  rollEndSpeedFactor: 0.3, // speed at the very end of the roll, relative to peak
-  kneelWindow: 0.25, // ADS within this long after a roll ends = kneel
+  rollEndSpeedFactor: 0.4, // speed at the very end of the roll, relative to peak (about walking speed)
+  rollTowardCursor: 0, // 0 = roll where you move, 1 = always roll toward the aim/cursor
+  kneelWindow: 0.25, // focus within this long after a roll ends, roll still held = kneel
 
   // Shooting
   hipSpreadDeg: 8, // full cone width (the cone cursor shows it)
   boltTime: 1.2,
-  chargeTime: 0.75,
-  kneelChargeTime: 0.5,
+  kneelChargeTime: 0.5, // empowered shot charge; only charges while kneeling (roll into focus)
   shotRange: 60,
   inputBuffer: 0.12,
 
@@ -42,6 +42,9 @@ export const config = {
   hitstopFrames: 4,
   chargedHitstopFrames: 8,
   knockback: 1.5, // meters of push on hit
+  hitStunTime: 0.25, // after being hit: no move, shoot or roll
+  invulnTime: 3, // after being hit: can't take damage (blinks white)
+  selfKnockback: 0.8, // meters the shooter is kicked back by an empowered shot
   knockbackTime: 0.15,
 
   // Round flow

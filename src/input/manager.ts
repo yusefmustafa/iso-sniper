@@ -1,24 +1,25 @@
-import { emptyCommand, type Command } from '../sim/types';
+import type { Command } from '../sim/types';
 import type { InputDevice } from './devices';
 import { Gamepad } from './gamepad';
 import { KeyboardMouse } from './keyboardMouse';
 
 /**
- * Tracks connected devices and which player slot each one controls.
- * The first device to press a button becomes P1, the next P2.
+ * One local player. Keyboard + mouse and any connected controller all work;
+ * whichever was touched last drives the player.
  */
 export class InputManager {
   readonly kbm: KeyboardMouse;
   private pads = new Map<number, Gamepad>();
-  slots: (InputDevice | null)[] = [null, null];
+  active: InputDevice;
 
   constructor(kbm: KeyboardMouse) {
     this.kbm = kbm;
+    this.active = kbm;
     window.addEventListener('gamepadconnected', (e) => this.addPad(e.gamepad));
     window.addEventListener('gamepaddisconnected', (e) => {
       const pad = this.pads.get(e.gamepad.index);
       this.pads.delete(e.gamepad.index);
-      this.slots = this.slots.map((s) => (s === pad ? null : s));
+      if (this.active === pad) this.active = this.kbm;
     });
   }
 
@@ -32,24 +33,15 @@ export class InputManager {
     return [this.kbm, ...this.pads.values()];
   }
 
-  /** Join any unassigned device that pressed something. Returns the slot that just joined, if any. */
-  tryJoin(): number | null {
-    for (const d of this.devices) {
-      if (this.slots.includes(d) || !d.anyPressed()) continue;
-      const free = this.slots.indexOf(null);
-      if (free === -1) return null;
-      this.slots[free] = d;
-      return free;
-    }
-    return null;
-  }
-
   anyStart(): boolean {
     return this.devices.some((d) => d.startPressed());
   }
 
-  commands(positions: { x: number; z: number }[]): Command[] {
-    return this.slots.map((d, i) => (d ? d.poll(positions[i]) : emptyCommand()));
+  command(position: { x: number; z: number }): Command {
+    for (const d of this.devices) if (d !== this.active && d.anyPressed()) this.active = d;
+    const c = this.active.poll(position);
+    c.start = this.anyStart();
+    return c;
   }
 
   endTick() {

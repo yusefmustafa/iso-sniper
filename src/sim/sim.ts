@@ -1,5 +1,6 @@
 import { config as defaultConfig, type Config } from '../config';
 import { defaultArena, rayToCircle, rayToWorld, resolveCircle } from './arena';
+import { datan2, dcos, dhypot, dsin } from './dmath';
 import { nextRandom } from './rng';
 import type { Command, GameState, PlayerState } from './types';
 
@@ -20,7 +21,7 @@ function newPlayer(id: number, state: GameState, dummy: boolean, cfg: Config): P
     id, x: s.x, z: s.z, vx: 0, vz: 0, aim: s.aim, hp: cfg.maxHp,
     stance: 'normal', ads: false, adsTicks: 0, boltTicks: 0, gunRaiseTicks: 0,
     rollTicks: 0, rollDirX: 0, rollDirZ: 0, rollCooldownTicks: 0, sinceRollTicks: 9999,
-    fireBuffer: 0, rollBuffer: 0, knockX: 0, knockZ: 0, knockTicks: 0, sprintRamp: 0,
+    fireBuffer: 0, rollBuffer: 0, knockX: 0, knockZ: 0, knockTicks: 0, stunTicks: 0, invulnTicks: 0, adsLock: false, sprintRamp: 0,
     prevFire: false, prevRoll: false, dummy,
   };
 }
@@ -45,11 +46,19 @@ function resetRound(state: GameState, cfg: Config) {
 export const hitRadius = (p: PlayerState, cfg: Config = defaultConfig) =>
   p.stance === 'kneel' ? cfg.kneelRadius : cfg.playerRadius;
 
-export const chargeTicksFor = (p: PlayerState, cfg: Config = defaultConfig) =>
-  secToTicks(p.stance === 'kneel' ? cfg.kneelChargeTime : cfg.chargeTime, cfg);
+/**
+ * The empowered (2 HP) shot only charges in a kneel, i.e. after rolling
+ * straight into focus. Standing focus is accurate but never empowered.
+ */
+export const chargeTicksFor = (_p: PlayerState, cfg: Config = defaultConfig) =>
+  secToTicks(cfg.kneelChargeTime, cfg);
+
+/** 0..1 progress of the empowered charge; 0 unless kneeling in focus. */
+export const chargeProgress = (p: PlayerState, cfg: Config = defaultConfig) =>
+  p.ads && p.stance === 'kneel' ? Math.min(1, p.adsTicks / Math.max(1, chargeTicksFor(p, cfg))) : 0;
 
 export const isCharged = (p: PlayerState, cfg: Config = defaultConfig) =>
-  p.ads && p.adsTicks >= chargeTicksFor(p, cfg);
+  p.ads && p.stance === 'kneel' && p.adsTicks >= chargeTicksFor(p, cfg);
 
 /** Can this player's gun fire or aim right now (ignoring the bolt)? */
 export const gunUp = (p: PlayerState) => p.stance !== 'roll' && p.stance !== 'sprint' && p.gunRaiseTicks === 0;
@@ -88,7 +97,7 @@ export function step(state: GameState, commands: Command[], cfg: Config = defaul
       return;
     }
     case 'roundEnd': {
-      state.phaseTicks--;
+      state.phaseTicks -= timeScale(state, cfg);
       state.players.forEach((p) => integrate(state, p, cfg, true));
       if (state.phaseTicks <= 0) {
         state.round++;
@@ -98,17 +107,21 @@ export function step(state: GameState, commands: Command[], cfg: Config = defaul
     }
     case 'matchEnd':
       state.players.forEach((p) => integrate(state, p, cfg, true));
+      // Either player can call the rematch. It goes through the sim so both
+      // machines restart on the same tick.
+      if (state.slowmoTicks === 0 && commands.some((c) => c?.start)) restartMatch(state, cfg);
       return;
     case 'playing':
       break;
   }
 
-  state.players.forEach((p, i) => updatePlayer(state, p, p.dummy ? undefined : commands[i], cfg));
+  // The practice dummy normally gets empty commands; the dev toggle can make it shoot.
+  state.players.forEach((p, i) => updatePlayer(state, p, commands[i], cfg));
   separatePlayers(state, cfg);
 }
 
 function bufferPresses(p: PlayerState, c: Command | undefined, cfg: Config) {
-  if (!c || p.dummy) return;
+  if (!c) return;
   if (c.fire && !p.prevFire) p.fireBuffer = secToTicks(cfg.inputBuffer, cfg);
   if (c.roll && !p.prevRoll) p.rollBuffer = secToTicks(cfg.inputBuffer, cfg);
   p.prevFire = c.fire;
@@ -126,28 +139,44 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
     if (p.boltTicks === 0) state.events.push({ type: 'boltReady', player: p.id });
   }
   if (p.stance !== 'roll') p.sinceRollTicks++;
+  if (p.invulnTicks > 0) p.invulnTicks--;
+
+  // A hit cancels focus until the button is let go (checked on the raw input, before the stun hides it).
+  if (!c?.ads) p.adsLock = false;
+
+  // Hit stun: input is ignored for a moment (aim still follows the cursor). Held buttons are
+  // tracked so nothing fires the instant the stun ends, and buffered presses are dropped.
+  if (p.stunTicks > 0) {
+    p.stunTicks--;
+    if (c) { if (c.aimActive) p.aim = c.aim; p.prevFire = c.fire; p.prevRoll = c.roll; }
+    p.fireBuffer = 0; p.rollBuffer = 0;
+    c = undefined;
+  }
 
   bufferPresses(p, c, cfg);
 
   // Move input, clamped to the unit circle
   let mx = c?.moveX ?? 0, mz = c?.moveZ ?? 0;
-  const mlen = Math.hypot(mx, mz);
+  const mlen = dhypot(mx, mz);
   if (mlen > 1) { mx /= mlen; mz /= mlen; }
   const moving = mlen > 0.15;
   const wantsAds = !!c?.ads;
 
   // Aim: explicit aim input wins. A gamepad with an idle right stick faces the move direction.
-  if (c && p.stance !== 'roll') {
+  // Aim keeps tracking during a roll (the flip is drawn along the roll direction).
+  if (c) {
     if (c.aimActive) p.aim = c.aim;
-    else if (moving && !wantsAds && p.stance !== 'kneel') p.aim = Math.atan2(mz, mx);
+    else if (moving && !wantsAds && p.stance !== 'kneel' && p.stance !== 'roll') p.aim = datan2(mz, mx);
   }
 
   // Roll start (buffered press)
   if (p.rollBuffer > 0 && p.rollCooldownTicks === 0 && p.stance !== 'roll') {
     p.rollBuffer = 0;
-    const dx = moving ? mx / Math.max(mlen, 1e-6) : Math.cos(p.aim);
-    const dz = moving ? mz / Math.max(mlen, 1e-6) : Math.sin(p.aim);
-    const n = Math.hypot(dx, dz) || 1;
+    // Roll toward the move direction (falls back to the aim when standing still), or always toward the aim.
+    const towardAim = cfg.rollTowardCursor >= 0.5 || !moving;
+    const dx = towardAim ? dcos(p.aim) : mx / Math.max(mlen, 1e-6);
+    const dz = towardAim ? dsin(p.aim) : mz / Math.max(mlen, 1e-6);
+    const n = dhypot(dx, dz) || 1;
     p.rollDirX = dx / n; p.rollDirZ = dz / n;
     p.stance = 'roll';
     p.rollTicks = secToTicks(cfg.rollTime, cfg);
@@ -162,14 +191,16 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
     p.sinceRollTicks = 0;
     p.rollCooldownTicks = secToTicks(cfg.rollCooldown, cfg);
   }
-  if (p.stance === 'normal' && wantsAds && !p.ads && p.sinceRollTicks <= secToTicks(cfg.kneelWindow, cfg)) {
+  // The kneel (and with it the empowered shot) needs the roll button still held.
+  const holdingRoll = !!c?.roll;
+  if (p.stance === 'normal' && wantsAds && holdingRoll && !p.ads && p.sinceRollTicks <= secToTicks(cfg.kneelWindow, cfg)) {
     p.stance = 'kneel';
     state.events.push({ type: 'kneel', player: p.id });
   }
 
-  // Kneel exit: letting go of ADS stands you up. Move input is ignored while
-  // kneeling, so a player still holding the stick after a roll stays planted.
-  if (p.stance === 'kneel' && !wantsAds) p.stance = 'normal';
+  // Kneel exit: letting go of focus or of the roll button stands you up. Move
+  // input is ignored while kneeling, so a player still holding the stick stays planted.
+  if (p.stance === 'kneel' && (!wantsAds || !holdingRoll)) p.stance = 'normal';
 
   // Sprint: needs movement, and ADS overrides it.
   if (p.stance === 'normal' && c?.sprint && moving && !wantsAds) p.stance = 'sprint';
@@ -182,13 +213,13 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
     : 0;
 
   // ADS and charge
-  const canAds = wantsAds && gunUp(p);
+  const canAds = wantsAds && !p.adsLock && gunUp(p);
   if (canAds) {
     if (!p.ads) { p.ads = true; p.adsTicks = 0; }
-    const wasCharged = p.adsTicks >= chargeTicksFor(p, cfg);
+    const wasCharged = isCharged(p, cfg);
     // The charge only builds while the chamber is loaded.
     if (p.boltTicks === 0) p.adsTicks++;
-    if (!wasCharged && p.adsTicks >= chargeTicksFor(p, cfg)) state.events.push({ type: 'charged', player: p.id });
+    if (!wasCharged && isCharged(p, cfg)) state.events.push({ type: 'charged', player: p.id });
   } else {
     p.ads = false; p.adsTicks = 0;
   }
@@ -209,19 +240,22 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   if (p.stance === 'roll') {
     const total = secToTicks(cfg.rollTime, cfg);
     const t = (total - p.rollTicks) / total; // 0..1 through the roll
-    // Full speed for the first two thirds, then ease out to rollEndSpeedFactor.
+    // Full speed for the first half, then a smooth ease down to rollEndSpeedFactor,
+    // which is close to walking speed so the roll hands its momentum to the run.
     const end = cfg.rollEndSpeedFactor;
-    const peak = cfg.rollDistance / (cfg.rollTime * (2 / 3 + (1 / 3) * (1 + end) / 2));
-    const f = t < 2 / 3 ? 1 : 1 - (1 - end) * ((t - 2 / 3) * 3);
+    const hold = 0.5;
+    const peak = cfg.rollDistance / (cfg.rollTime * (hold + (1 - hold) * (1 + end) / 2));
+    const u = t < hold ? 0 : (t - hold) / (1 - hold);
+    const f = 1 - (1 - end) * u * u * (3 - 2 * u);
     p.vx = p.rollDirX * peak * f;
     p.vz = p.rollDirZ * peak * f;
     p.rollTicks--;
   } else {
     const tx = mx * speed, tz = mz * speed;
-    const accelerating = tx * p.vx + tz * p.vz >= 0 && Math.hypot(tx, tz) > 1e-6;
+    const accelerating = tx * p.vx + tz * p.vz >= 0 && dhypot(tx, tz) > 1e-6;
     const rate = (accelerating ? cfg.walkSpeed / cfg.accelTime : cfg.walkSpeed / cfg.stopTime) * dt;
     const dx = tx - p.vx, dz = tz - p.vz;
-    const dl = Math.hypot(dx, dz);
+    const dl = dhypot(dx, dz);
     if (dl <= rate) { p.vx = tx; p.vz = tz; }
     else { p.vx += (dx / dl) * rate; p.vz += (dz / dl) * rate; }
   }
@@ -229,18 +263,27 @@ function updatePlayer(state: GameState, p: PlayerState, c: Command | undefined, 
   integrate(state, p, cfg, false);
 }
 
+/**
+ * Slow motion after a round-winning shot. Ticks keep their real-time pace (both
+ * online peers must tick at the same rate), so slow motion shrinks the time step
+ * instead of slowing the tick loop.
+ */
+export const timeScale = (state: GameState, cfg: Config = defaultConfig) =>
+  state.slowmoTicks > 0 ? cfg.finalShotSlowmo : 1;
+
 function integrate(state: GameState, p: PlayerState, cfg: Config, frictionOnly: boolean) {
-  const dt = 1 / cfg.tickRate;
+  const scale = timeScale(state, cfg);
+  const dt = scale / cfg.tickRate;
   if (frictionOnly) {
     // Outside of play, players slide to a stop but keep their knockback.
-    const k = Math.max(0, 1 - (cfg.walkSpeed / cfg.stopTime) * dt / Math.max(Math.hypot(p.vx, p.vz), 1e-6));
+    const k = Math.max(0, 1 - (cfg.walkSpeed / cfg.stopTime) * dt / Math.max(dhypot(p.vx, p.vz), 1e-6));
     p.vx *= k; p.vz *= k;
   }
   let kx = 0, kz = 0;
   if (p.knockTicks > 0) {
     const f = p.knockTicks / secToTicks(cfg.knockbackTime, cfg);
     kx = p.knockX * f * 2; kz = p.knockZ * f * 2; // linear decay, integrates to the knockback distance
-    p.knockTicks--;
+    p.knockTicks = Math.max(0, p.knockTicks - scale);
   }
   p.x += (p.vx + kx) * dt;
   p.z += (p.vz + kz) * dt;
@@ -251,7 +294,7 @@ function separatePlayers(state: GameState, cfg: Config) {
   const [a, b] = state.players;
   const ra = hitRadius(a, cfg), rb = hitRadius(b, cfg);
   const dx = b.x - a.x, dz = b.z - a.z;
-  const d = Math.hypot(dx, dz);
+  const d = dhypot(dx, dz);
   const min = ra + rb;
   if (d >= min || d < 1e-6) return;
   const push = (min - d) / 2;
@@ -267,9 +310,9 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
   // Hip-fire spreads randomly inside the cone; an aimed shot goes exactly down the laser.
   const spread = aimed ? 0 : (nextRandom(state) - 0.5) * cfg.hipSpreadDeg * DEG;
   const ang = p.aim + spread;
-  const dx = Math.cos(ang), dz = Math.sin(ang);
-  const ox = p.x + Math.cos(p.aim) * MUZZLE_OFFSET * 0.5;
-  const oz = p.z + Math.sin(p.aim) * MUZZLE_OFFSET * 0.5;
+  const dx = dcos(ang), dz = dsin(ang);
+  const ox = p.x + dcos(p.aim) * MUZZLE_OFFSET * 0.5;
+  const oz = p.z + dsin(p.aim) * MUZZLE_OFFSET * 0.5;
 
   const wallDist = rayToWorld(state.arena, ox, oz, dx, dz, cfg.shotRange);
   let hit: number | null = null;
@@ -283,27 +326,42 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
   state.events.push({
     type: 'shot', player: p.id, fromX: ox, fromZ: oz,
     toX: ox + dx * dist, toZ: oz + dz * dist, charged, aimed, hit,
+    blocked: hit !== null && state.players[hit].invulnTicks > 0,
   });
 
   p.boltTicks = secToTicks(cfg.boltTime, cfg);
   p.adsTicks = 0; // the next charge starts over
 
-  if (hit !== null) {
+  // The empowered shot kicks the shooter back out of the kneel (Graves-style, short).
+  // To empower again you roll into focus again.
+  if (charged) {
+    p.stance = 'normal';
+    p.knockX = -dx * cfg.selfKnockback / cfg.knockbackTime;
+    p.knockZ = -dz * cfg.selfKnockback / cfg.knockbackTime;
+    p.knockTicks = secToTicks(cfg.knockbackTime, cfg);
+  }
+
+  // A shot that hits an invulnerable player stops on them but does nothing.
+  if (hit !== null && state.players[hit].invulnTicks === 0) {
     const o = state.players[hit];
     const damage = charged ? cfg.chargedDamage : 1;
     o.hp = Math.max(0, o.hp - damage);
     o.knockX = dx * cfg.knockback / cfg.knockbackTime;
     o.knockZ = dz * cfg.knockback / cfg.knockbackTime;
     o.knockTicks = secToTicks(cfg.knockbackTime, cfg);
+    o.stunTicks = secToTicks(cfg.hitStunTime, cfg);
+    o.invulnTicks = secToTicks(cfg.invulnTime, cfg);
     // Getting shot breaks your aim.
-    o.ads = false; o.adsTicks = 0;
+    // Getting hit cancels focus and any charge (empowered shot included); focus needs a fresh press.
+    o.ads = false; o.adsTicks = 0; o.adsLock = true;
     if (o.stance === 'kneel') o.stance = 'normal';
     state.hitstop = charged ? cfg.chargedHitstopFrames : cfg.hitstopFrames;
     state.events.push({ type: 'hit', player: o.id, by: p.id, damage, dirX: dx, dirZ: dz });
 
     if (o.hp === 0) {
       state.score[p.id]++;
-      state.slowmoTicks = secToTicks(cfg.finalShotSlowmoTime, cfg);
+      // finalShotSlowmoTime is game time; in real time it lasts 1/finalShotSlowmo longer.
+      state.slowmoTicks = secToTicks(cfg.finalShotSlowmoTime / cfg.finalShotSlowmo, cfg);
       state.events.push({ type: 'roundWon', player: p.id, score: [...state.score] });
       if (state.score[p.id] >= cfg.roundsToWin) {
         state.phase = 'matchEnd';

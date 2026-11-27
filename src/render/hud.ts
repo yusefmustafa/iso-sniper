@@ -2,6 +2,11 @@ import { config } from '../config';
 import type { GameState } from '../sim/types';
 import { PLAYER_COLORS } from './scene';
 
+export type LobbyView =
+  | { kind: 'menu'; message?: string; on: (id: string) => void }
+  | { kind: 'waiting'; link: string; status: string; copied: boolean; on: (id: string) => void }
+  | { kind: 'connecting'; status: string; on: (id: string) => void };
+
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
 /** DOM overlay: score, banners, join screen, HP pips over heads. */
@@ -13,6 +18,9 @@ export class Hud {
   private join: HTMLElement;
   private pips: HTMLElement[] = [];
   private bannerUntil = 0;
+  private net: HTMLElement;
+  private leave: HTMLElement;
+  private lobbyKey = '';
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'hud', parent);
@@ -20,28 +28,60 @@ export class Hud {
     this.banner = el('div', 'banner', this.root);
     this.sub = el('div', 'banner-sub', this.root);
     this.join = el('div', 'join', this.root);
+    this.net = el('div', 'net', this.root);
+    this.leave = el('button', 'leave', this.root);
+    this.leave.textContent = 'Leave match';
     for (let i = 0; i < 2; i++) {
       const p = el('div', 'pips', this.root);
       p.style.setProperty('--c', hex(PLAYER_COLORS[i]));
       this.pips.push(p);
     }
     el('div', 'help', this.root).innerHTML =
-      'WASD move · Mouse aim · RMB focus · LMB shoot · Shift sprint · Space roll · F fullscreen · Esc free mouse &nbsp;|&nbsp; Pad: LS move · RS aim · LT focus · RT shoot · LB sprint · A roll &nbsp;|&nbsp; ` tuning';
+      'WASD move · Mouse aim · RMB focus · LMB shoot · Shift sprint · Space roll · F fullscreen · Esc free mouse &nbsp;|&nbsp; Pad: LS move · RS aim · LT focus · RT shoot · LB sprint · A roll &nbsp;|&nbsp; ` tuning (practice)';
   }
 
-  showJoin(slots: (string | null)[]) {
+  /** The front screen: create a match link, join one, or practice. */
+  showLobby(view: LobbyView) {
     this.join.style.display = 'block';
+    this.join.classList.add('lobby');
     this.score.style.display = 'none';
     this.pips.forEach((p) => (p.style.display = 'none'));
-    const row = (i: number) => {
-      const c = hex(PLAYER_COLORS[i]);
-      return `<div class="slot" style="--c:${c}"><b>P${i + 1}</b> ${slots[i] ? `${slots[i]} <span class="ok">ready</span>` : '<span class="wait">press any button</span>'}</div>`;
-    };
-    this.join.innerHTML = `<h1>ISO SNIPERS</h1><p class="tag">First playable · couch 1v1</p>${row(0)}${row(1)}
-      <p class="hint">${slots[0] && !slots[1] ? 'Solo? Press <b>Enter</b> or <b>Start</b> to practice against a dummy.' : 'Keyboard + mouse and controllers can mix freely.'}</p>`;
+    this.net.style.display = 'none';
+    const key = JSON.stringify(view, (_k, v) => (typeof v === 'function' ? undefined : v));
+    if (key === this.lobbyKey) return;
+    this.lobbyKey = key;
+    const btn = (id: string, label: string, primary = false) => `<button data-id="${id}" class="${primary ? 'primary' : ''}">${label}</button>`;
+    let body = '';
+    if (view.kind === 'menu') {
+      body = `${btn('create', 'Create online match', true)}${btn('practice', 'Practice vs dummy')}
+        ${view.message ? `<p class="hint warn">${view.message}</p>` : '<p class="hint">Create a match and send the link to a friend. They click it and you duel.</p>'}`;
+    } else if (view.kind === 'waiting') {
+      body = `<p class="hint">Send this link to your opponent:</p>
+        <div class="link"><input readonly value="${view.link}" />${btn('copy', view.copied ? 'Copied' : 'Copy', true)}</div>
+        <p class="status"><span class="wait">${view.status}</span></p>${btn('cancel', 'Cancel')}`;
+    } else {
+      body = `<p class="status"><span class="wait">${view.status}</span></p>${btn('cancel', 'Back')}`;
+    }
+    this.join.innerHTML = `<h1>ISO SNIPERS</h1><p class="tag">Online 1v1 sniper duels</p>${body}`;
+    this.join.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => view.on(b.dataset.id!)));
+    this.join.querySelector<HTMLInputElement>('input')?.addEventListener('focus', (e) => (e.target as HTMLInputElement).select());
+  }
+
+  /** "Leave match" button, shown while the mouse is free (Esc) during a match. */
+  setLeave(visible: boolean, onLeave: () => void) {
+    this.leave.style.display = visible ? 'block' : 'none';
+    this.leave.onclick = onLeave;
+  }
+
+  /** Ping and connection warnings during an online match. */
+  setNet(text: string, warn = false) {
+    this.net.style.display = text ? 'block' : 'none';
+    this.net.textContent = text;
+    this.net.classList.toggle('warn', warn);
   }
 
   hideJoin() {
+    this.lobbyKey = '';
     this.join.style.display = 'none';
     this.score.style.display = 'flex';
   }

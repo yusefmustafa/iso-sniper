@@ -1,6 +1,8 @@
 import { config } from '../config';
-import { chargeTicksFor, gunUp, isCharged } from '../sim/sim';
-import type { GameState } from '../sim/types';
+import { settings } from '../settings';
+import { rayToWorld } from '../sim/arena';
+import { chargeProgress, gunUp, isCharged } from '../sim/sim';
+import type { Arena, GameState } from '../sim/types';
 import { AIM_HEIGHT, PLAYER_COLORS } from './scene';
 
 const DEG = Math.PI / 180;
@@ -42,6 +44,27 @@ export class AimCursor {
     this.canvas.height = Math.round(window.innerHeight * this.dpr);
   }
 
+  private hatchPattern: CanvasPattern | null = null;
+  /** Red diagonal stripes for the blocked part of the cone. */
+  private hatch(): CanvasPattern {
+    if (!this.hatchPattern) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 10;
+      const h = c.getContext('2d')!;
+      h.strokeStyle = '#ff4d4d'; h.lineWidth = 2;
+      h.beginPath(); h.moveTo(-2, 12); h.lineTo(12, -2); h.moveTo(-2, 2); h.lineTo(2, -2); h.moveTo(8, 12); h.lineTo(12, 8); h.stroke();
+      this.hatchPattern = this.g.createPattern(c, 'repeat')!;
+    }
+    return this.hatchPattern;
+  }
+
+  private openArenaCache: { src: Arena; open: Arena } | null = null;
+  /** The arena without its cover, for rays that should only stop at the outer walls. */
+  private openArena(arena: Arena): Arena {
+    if (this.openArenaCache?.src !== arena) this.openArenaCache = { src: arena, open: { ...arena, boxes: [] } };
+    return this.openArenaCache.open;
+  }
+
   clear() {
     this.g.setTransform(1, 0, 0, 1, 0, 0);
     this.g.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -73,27 +96,96 @@ export class AimCursor {
       const alpha = ready ? 1 : 0.35;
       const half = (config.hipSpreadDeg / 2) * DEG * open;
       const start = 0.7; // start the cone just past the muzzle
+      // Settings: end the cone at the cursor, or project it the whole way out to the arena edge.
+      // Projected, each ray is colored up to where a shot along it would stop; past cover the
+      // rest of it is greyed out ("Grey out blocked"), or colored all the way ("Through walls").
+      const full = settings.coneLength === 'full';
+      const style = settings.coneWalls; // how the part of the cone behind cover is shown
+      const blocks = full && style !== 'through';
+      const open2 = this.openArena(state.arena);
+      let clearPct: number | null = null;
 
-      // Cone: two edges and an arc at the cursor's distance.
       if (open > 0.02) {
-        const steps = 12;
-        g.beginPath();
-        const a = at(p.aim - half, start);
-        g.moveTo(a.x, a.y);
+        const steps = full ? 48 : 12;
+        const hit: { x: number; y: number }[] = [], far: { x: number; y: number }[] = [];
+        const blocked: boolean[] = [];
+        let clearRays = 0;
         for (let s = 0; s <= steps; s++) {
-          const q = at(p.aim - half + (2 * half * s) / steps, reach);
-          g.lineTo(q.x, q.y);
+          const ang = p.aim - half + (2 * half * s) / steps;
+          const dx = Math.cos(ang), dz = Math.sin(ang);
+          if (!full) { hit.push(at(ang, reach)); continue; }
+          const edge = Math.max(start, rayToWorld(open2, pos.x, pos.z, dx, dz, config.shotRange));
+          const stop = blocks ? Math.max(start, Math.min(edge, rayToWorld(state.arena, pos.x, pos.z, dx, dz, config.shotRange))) : edge;
+          hit.push(at(ang, stop));
+          far.push(at(ang, edge));
+          blocked.push(stop < edge - 0.05);
+          // "Clear" = this ray gets at least as far as the cursor.
+          if (stop >= Math.min(reach, edge) - 0.05) clearRays++;
         }
-        const b = at(p.aim + half, start);
-        g.lineTo(b.x, b.y);
-        g.closePath();
-        g.globalAlpha = 0.12 * alpha * open;
+        if (full) clearPct = Math.round((100 * clearRays) / (steps + 1));
+        const a = at(p.aim - half, start), b = at(p.aim + half, start);
+        const poly = (pts: { x: number; y: number }[]) => { g.beginPath(); g.moveTo(pts[0].x, pts[0].y); for (const q of pts) g.lineTo(q.x, q.y); g.closePath(); };
+
+        // Live part: where a hip shot can actually land.
+        poly([a, ...hit, b]);
+        g.globalAlpha = (full ? 0.08 : 0.12) * alpha * open;
         g.fillStyle = color;
         g.fill();
         g.globalAlpha = 0.75 * alpha * Math.max(0.3, open);
         g.strokeStyle = color;
         g.lineWidth = 1.5;
         g.stroke();
+
+        if (blocks) {
+          const behind = () => poly([...hit, ...far.slice().reverse()]);
+          const sideLines = (c: string, w: number) => {
+            g.strokeStyle = c; g.lineWidth = w;
+            g.beginPath(); g.moveTo(hit[0].x, hit[0].y); g.lineTo(far[0].x, far[0].y);
+            g.moveTo(hit[steps].x, hit[steps].y); g.lineTo(far[steps].x, far[steps].y);
+            g.stroke();
+          };
+          // Where rays hit cover: a bright line along the impact points.
+          const impactLine = (c: string, w: number) => {
+            g.strokeStyle = c; g.lineWidth = w; g.lineCap = 'round';
+            g.beginPath();
+            for (let s = 0; s <= steps; s++) {
+              if (!blocked[s]) continue;
+              if (s === 0 || !blocked[s - 1]) g.moveTo(hit[s].x, hit[s].y); else g.lineTo(hit[s].x, hit[s].y);
+              if (s === steps || !blocked[s + 1]) g.lineTo(hit[s].x + 0.01, hit[s].y);
+            }
+            g.stroke();
+            g.lineCap = 'butt';
+          };
+          if (style === 'stop' || style === 'percent') {
+            // A: grey continuation (the earlier look).
+            behind(); g.globalAlpha = 0.07 * alpha * open; g.fillStyle = '#9aa1ad'; g.fill();
+            g.globalAlpha = 0.35 * alpha * Math.max(0.3, open); sideLines('#9aa1ad', 1);
+          } else if (style === 'hatch') {
+            // B: red hatching behind cover, plus a red impact line on the cover face.
+            behind(); g.globalAlpha = 0.55 * alpha * open; g.fillStyle = this.hatch(); g.fill();
+            g.globalAlpha = 0.5 * alpha * Math.max(0.3, open); sideLines('#ff5a5a', 1);
+            g.globalAlpha = 0.95 * alpha * Math.max(0.3, open); impactLine('#ff4d4d', 3);
+          } else if (style === 'cut') {
+            // C: nothing drawn behind cover; the blocked rays end in a hard white-red impact edge.
+            g.globalAlpha = alpha * Math.max(0.3, open); impactLine('#ffffff', 4);
+            impactLine('#ff3b3b', 2);
+          }
+        }
+      }
+
+      // D: "% clear" readout by the crosshair: how much of the spread gets as far as the cursor.
+      if (style === 'percent' && clearPct !== null && open > 0.3) {
+        const cp = at(p.aim, reach);
+        const t = clearPct / 100;
+        g.globalAlpha = alpha * Math.min(1, (open - 0.3) / 0.4);
+        g.font = '700 13px system-ui, sans-serif';
+        g.textBaseline = 'middle';
+        const txt = `${clearPct}% clear`;
+        const w = g.measureText(txt).width + 12;
+        g.fillStyle = 'rgba(10,12,16,0.7)';
+        g.beginPath(); g.roundRect(cp.x + 16, cp.y - 11, w, 22, 6); g.fill();
+        g.fillStyle = t > 0.85 ? '#7dff9a' : t > 0.4 ? '#ffcf5c' : '#ff5a5a';
+        g.fillText(txt, cp.x + 22, cp.y);
       }
 
       // Crosshair at the cursor: grows in as the cone closes.
@@ -114,9 +206,9 @@ export class AimCursor {
       g.arc(c.x, c.y, 1.8, 0, Math.PI * 2);
       g.fill();
 
-      // Charge ring around the crosshair while focusing.
-      if (p.ads && closed > 0.3) {
-        const frac = Math.min(1, p.adsTicks / chargeTicksFor(p));
+      // Empowered-shot charge ring around the crosshair (kneeling only).
+      if (p.ads && p.stance === 'kneel' && closed > 0.3) {
+        const frac = chargeProgress(p);
         const r = 15;
         g.globalAlpha = 0.25 * alpha;
         g.beginPath(); g.arc(c.x, c.y, r, 0, Math.PI * 2); g.stroke();

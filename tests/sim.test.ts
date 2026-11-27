@@ -34,12 +34,45 @@ describe('shooting', () => {
     expect(g.players[1].hp).toBe(2);
   });
 
-  it('holding ADS for the charge time makes the shot deal 2 HP', () => {
+  it('standing focus never empowers the shot, however long it is held', () => {
     const g = playing();
-    const ev = run(g, T(config.chargeTime) + 1, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
-    expect(ev.some((e) => e.type === 'charged')).toBe(true);
+    const ev = run(g, T(2), (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    expect(ev.some((e) => e.type === 'charged')).toBe(false);
     run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }));
+    expect(g.players[1].hp).toBe(2);
+  });
+
+  it('rolling into focus empowers the shot: 2 HP, and the shooter is kicked back out of the kneel', () => {
+    const g = playing();
+    run(g, 1, (g) => cmd({ moveZ: 1, roll: true, aim: aimAt(g, 0, 1) }));
+    run(g, T(config.rollTime) + 1, (g) => cmd({ ads: true, roll: true, aim: aimAt(g, 0, 1) }));
+    expect(g.players[0].stance).toBe('kneel');
+    const ev = run(g, T(config.kneelChargeTime) + 1, (g) => cmd({ ads: true, roll: true, aim: aimAt(g, 0, 1) }));
+    expect(ev.some((e) => e.type === 'charged')).toBe(true);
+    const x0 = g.players[0].x;
+    run(g, 1, (g) => cmd({ ads: true, roll: true, fire: true, aim: aimAt(g, 0, 1) }));
     expect(g.players[1].hp).toBe(1);
+    expect(g.players[0].stance).toBe('normal');
+    run(g, config.chargedHitstopFrames + T(config.knockbackTime) + 2, () => cmd({ aim: 0 }));
+    // P1 starts on the left aiming right (+X), so the kick pushes toward -X.
+    expect(x0 - g.players[0].x).toBeGreaterThan(config.selfKnockback * 0.7);
+  });
+
+  it('rollTowardCursor rolls along the aim instead of the move direction', () => {
+    const g = playing();
+    const cfg = { ...config, rollTowardCursor: 1 };
+    step(g, [cmd({ moveZ: 1, roll: true, aim: 0 }), cmd({ aim: Math.PI })], cfg);
+    expect(g.players[0].stance).toBe('roll');
+    expect(g.players[0].rollDirX).toBeCloseTo(1, 5);
+    expect(g.players[0].rollDirZ).toBeCloseTo(0, 5);
+  });
+
+  it('aim keeps tracking while rolling', () => {
+    const g = playing();
+    run(g, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
+    run(g, 3, () => cmd({ aim: 1 }));
+    expect(g.players[0].stance).toBe('roll');
+    expect(g.players[0].aim).toBe(1);
   });
 
   it('the bolt cycle blocks a second shot until it finishes', () => {
@@ -93,13 +126,27 @@ describe('movement', () => {
     expect(g.players[0].z - z0).toBeLessThan(config.rollDistance * 1.15);
   });
 
-  it('rolling straight into ADS kneels, and kneeling charges faster', () => {
+  it('rolling into focus with roll still held kneels and charges', () => {
+    const g = playing();
+    run(g, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
+    run(g, T(config.rollTime) + 1, () => cmd({ moveZ: 1, roll: true, ads: true, aim: 0 }));
+    expect(g.players[0].stance).toBe('kneel');
+    const ev = run(g, T(config.kneelChargeTime) + 1, () => cmd({ ads: true, roll: true, aim: 0 }));
+    expect(ev.some((e) => e.type === 'charged')).toBe(true);
+  });
+
+  it('no kneel if the roll button was released, and letting go of it mid-kneel stands you up', () => {
     const g = playing();
     run(g, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
     run(g, T(config.rollTime) + 1, () => cmd({ moveZ: 1, ads: true, aim: 0 }));
-    expect(g.players[0].stance).toBe('kneel');
-    const ev = run(g, T(config.kneelChargeTime) + 1, () => cmd({ ads: true, aim: 0 }));
-    expect(ev.some((e) => e.type === 'charged')).toBe(true);
+    expect(g.players[0].stance).not.toBe('kneel');
+
+    const h = playing();
+    run(h, 1, () => cmd({ moveZ: 1, roll: true, aim: 0 }));
+    run(h, T(config.rollTime) + 1, () => cmd({ roll: true, ads: true, aim: 0 }));
+    expect(h.players[0].stance).toBe('kneel');
+    run(h, 1, () => cmd({ ads: true, aim: 0 }));
+    expect(h.players[0].stance).toBe('normal');
   });
 });
 
@@ -107,19 +154,72 @@ describe('rounds', () => {
   it('three hits win a round and reset both players', () => {
     const g = playing();
     for (let s = 0; s < 3; s++) {
-      run(g, T(config.boltTime) + 2, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
-      // Keep the charge short so each hit is 1 HP: release ADS first.
-      run(g, 1, (g) => cmd({ aim: aimAt(g, 0, 1) }));
+      // Wait out the bolt and the target's post-hit invulnerability, aiming down the laser.
+      run(g, Math.max(T(config.boltTime), T(config.invulnTime)) + config.hitstopFrames + 2, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
       run(g, 1, (g) => cmd({ fire: true, ads: true, aim: aimAt(g, 0, 1) }));
     }
-    // Hip shots can miss; this test only checks the bookkeeping when 3 HP are gone.
-    if (g.players[1].hp === 0) {
-      expect(g.score[0]).toBe(1);
-      expect(g.phase).toBe('roundEnd');
-      run(g, T(config.roundEndTime) + config.chargedHitstopFrames + 2, () => cmd());
-      expect(g.phase).toBe('countdown');
-      expect(g.players[1].hp).toBe(config.maxHp);
-    }
+    expect(g.players[1].hp).toBe(0);
+    expect(g.score[0]).toBe(1);
+    expect(g.phase).toBe('roundEnd');
+    run(g, T(config.roundEndTime) + T(config.finalShotSlowmoTime / config.finalShotSlowmo) + config.chargedHitstopFrames + 2, () => cmd());
+    expect(g.phase).toBe('countdown');
+    expect(g.players[1].hp).toBe(config.maxHp);
+  });
+
+  it('a hit stuns, pushes back and grants invulnerability; shots on an invulnerable player do nothing', () => {
+    const g = playing();
+    run(g, 3, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    const x1 = g.players[1].x;
+    run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }));
+    const o = g.players[1];
+    expect(o.hp).toBe(2);
+    expect(o.stunTicks).toBeGreaterThanOrEqual(T(config.hitStunTime) - 1); // the target already ticked once this frame
+    expect(o.invulnTicks).toBeGreaterThanOrEqual(T(config.invulnTime) - 1);
+    // Stunned: move input is ignored. (The hitstop frames pass first.)
+    run(g, config.hitstopFrames + 3, (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }), () => cmd({ moveZ: 1, aim: Math.PI }));
+    expect(Math.abs(o.z)).toBeLessThan(0.05);
+    expect(o.x).toBeGreaterThan(x1); // pushed back, away from the shooter
+    // Wait for the bolt (still inside the invulnerability), then shoot again: no damage.
+    run(g, T(config.boltTime), (g) => cmd({ ads: true, aim: aimAt(g, 0, 1) }));
+    expect(o.invulnTicks).toBeGreaterThan(0);
+    const ev = run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }));
+    const shot = ev.find((e) => e.type === 'shot');
+    expect(shot && shot.type === 'shot' && shot.blocked).toBe(true);
+    expect(o.hp).toBe(2);
+  });
+
+  it('a hit cancels a kneeling empowered charge, blocks shooting during the stun, and focus needs a fresh press', () => {
+    const g = playing();
+    // P2 rolls into a kneel and charges the empowered shot.
+    run(g, 1, () => cmd({ aim: 0 }), () => cmd({ moveZ: 1, roll: true, aim: Math.PI }));
+    run(g, T(config.rollTime) + 1, () => cmd({ aim: 0 }), () => cmd({ roll: true, ads: true, aim: Math.PI }));
+    run(g, T(config.kneelChargeTime) + 1, () => cmd({ aim: 0 }), () => cmd({ roll: true, ads: true, aim: Math.PI }));
+    const o = g.players[1];
+    expect(o.stance).toBe('kneel');
+    expect(o.adsTicks).toBeGreaterThanOrEqual(T(config.kneelChargeTime));
+    // P1 hits P2 down the laser.
+    run(g, 1, (g) => cmd({ ads: true, fire: true, aim: aimAt(g, 0, 1) }), () => cmd({ roll: true, ads: true, aim: Math.PI }));
+    expect(o.hp).toBe(2);
+    expect(o.ads).toBe(false);
+    expect(o.adsTicks).toBe(0);
+    expect(o.stance).toBe('normal');
+    // Pressing fire during the stun does nothing.
+    const evStun = run(g, config.hitstopFrames + T(config.hitStunTime) - 2, () => cmd({ aim: 0 }), (g) => cmd({ ads: true, fire: g.tick % 2 === 0, aim: Math.PI }));
+    expect(evStun.some((e) => e.type === 'shot' && e.player === 1)).toBe(false);
+    // Still holding focus after the stun: stays off until released and pressed again.
+    run(g, 3, () => cmd({ aim: 0 }), () => cmd({ ads: true, aim: Math.PI }));
+    expect(o.ads).toBe(false);
+    run(g, 1, () => cmd({ aim: 0 }), () => cmd({ aim: Math.PI }));
+    run(g, 1, () => cmd({ aim: 0 }), () => cmd({ ads: true, aim: Math.PI }));
+    expect(o.ads).toBe(true);
+  });
+
+  it('the practice dummy follows commands when given some', () => {
+    const g = createGame({ seed: 3, dummyP2: true });
+    g.arena.boxes = [];
+    for (let i = 0; i < T(config.countdownTime) + 1; i++) step(g, [emptyCommand(), emptyCommand()]);
+    const ev = run(g, 1, () => cmd(), () => cmd({ fire: true, aim: Math.PI }));
+    expect(ev.some((e) => e.type === 'shot' && e.player === 1)).toBe(true);
   });
 });
 

@@ -13,11 +13,12 @@ export interface Command {
   ads: boolean;
   fire: boolean; // held state; the sim detects presses
   roll: boolean; // held state; the sim detects presses
+  start: boolean; // rematch request at the end of a match
 }
 
 export const emptyCommand = (): Command => ({
   moveX: 0, moveZ: 0, aim: 0, aimActive: false,
-  sprint: false, ads: false, fire: false, roll: false,
+  sprint: false, ads: false, fire: false, roll: false, start: false,
 });
 
 export type Stance = 'normal' | 'sprint' | 'roll' | 'kneel';
@@ -45,6 +46,9 @@ export interface PlayerState {
   knockX: number; // knockback velocity
   knockZ: number;
   knockTicks: number;
+  stunTicks: number; // >0 right after being hit: no move, shoot or roll input
+  invulnTicks: number;
+  adsLock: boolean; // set by a hit: focus stays off until the focus button is released and pressed again // >0 after being hit: shots can't damage you (you can still shoot) // fractional during slow motion
   sprintRamp: number; // 0..1
   prevFire: boolean;
   prevRoll: boolean;
@@ -69,7 +73,7 @@ export interface Arena {
 export type Phase = 'countdown' | 'playing' | 'roundEnd' | 'matchEnd';
 
 export type SimEvent =
-  | { type: 'shot'; player: number; fromX: number; fromZ: number; toX: number; toZ: number; charged: boolean; aimed: boolean; hit: number | null }
+  | { type: 'shot'; player: number; fromX: number; fromZ: number; toX: number; toZ: number; charged: boolean; aimed: boolean; hit: number | null; blocked: boolean }
   | { type: 'hit'; player: number; by: number; damage: number; dirX: number; dirZ: number }
   | { type: 'charged'; player: number }
   | { type: 'boltReady'; player: number }
@@ -84,7 +88,7 @@ export interface GameState {
   tick: number;
   seed: number; // RNG state, advanced deterministically
   phase: Phase;
-  phaseTicks: number; // ticks left in the current timed phase
+  phaseTicks: number; // ticks left in the current timed phase (fractional during slow motion)
   round: number;
   score: number[];
   hitstop: number; // ticks the whole sim is frozen for impact
