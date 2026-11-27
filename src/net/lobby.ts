@@ -25,7 +25,8 @@ export interface LobbyCallbacks {
 /**
  * The pre-match room, over the reliable channel. The player who created the
  * link hosts and owns the room state: names, ready flags, and the match start
- * (seed + config). The guest only proposes its name and its ready flag.
+ * (seed + config). The host counts as always ready and starts the match once
+ * the guest is ready. The guest only proposes its name and its ready flag.
  */
 export class MatchLobby {
   readonly state: LobbyState = { local: null, names: [null, null], ready: [false, false], nameTaken: false };
@@ -53,7 +54,7 @@ export class MatchLobby {
 
   setReady(ready: boolean) {
     if (this.state.local === null || this.started) return;
-    if (this.isHost) { this.state.ready[0] = ready; this.broadcast(); }
+    if (this.isHost) return; // the host is always ready; they start the match instead
     else { this.state.ready[1] = ready; this.ch.sendReliable({ t: 'ready', ready }); this.emit(); }
   }
 
@@ -65,7 +66,7 @@ export class MatchLobby {
     this.emit();
   }
 
-  /** Host only, once both are ready. */
+  /** Host only, once the guest is ready. */
   start() {
     if (!this.canStart) return;
     this.started = true;
@@ -108,7 +109,7 @@ export class MatchLobby {
           this.role = iHost ? 'host' : 'guest';
           this.state.local = iHost ? 0 : 1;
           this.hello(); // make sure they have ours too
-          if (iHost) this.state.names[0] = this.name;
+          if (iHost) { this.state.names[0] = this.name; this.state.ready[0] = true; } // the host is always ready
         }
         if (this.isHost && !this.started) this.takeGuestName(m.name);
         else this.emit();

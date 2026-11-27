@@ -32,20 +32,19 @@ describe('names', () => {
 });
 
 describe('lobby', () => {
-  it('syncs names, needs both ready, then starts both peers with the same seed', () => {
+  it('syncs names, the host starts once the guest is ready, same seed on both peers', () => {
     const { host, guest, st, started, run } = pair('Yusef', 'Rival');
     run();
     expect(st[0]!.names).toEqual(['Yusef', 'Rival']);
     expect(st[1]!.names).toEqual(['Yusef', 'Rival']);
     host.start();
     run();
-    expect(started[0]).toBeNull(); // nobody ready yet
+    expect(started[0]).toBeNull(); // the guest isn't ready yet
+    expect(host.canStart).toBe(false);
     guest.setReady(true);
     run();
-    expect(host.canStart).toBe(false);
-    host.setReady(true);
-    run();
-    expect(st[1]!.ready).toEqual([true, true]);
+    expect(st[1]!.ready).toEqual([true, true]); // the host counts as always ready
+    expect(host.canStart).toBe(true);
     host.start();
     run();
     expect(started[0]!.localPlayer).toBe(0);

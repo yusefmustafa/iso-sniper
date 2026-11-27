@@ -54,7 +54,8 @@ All numbers live in `src/config.ts` and can be changed live from the tuning pane
 ## Online play
 
 Flow: type a name, click **Create online match**, send the link. Your friend opens it, types a name (it
-can't match yours) and joins. Both press **Ready**, then the host (the link's creator) clicks **Start match**.
+can't match yours) and joins, then presses **Ready**. The host (the link's creator) is always ready and clicks **Start match**
+once the guest is ready.
 A link holds two players; anyone else who opens it sees "match full". If the host leaves, the room closes;
 if the guest leaves, the host's link keeps working for someone new. After the match a results card shows
 the winner, the final score, accuracy, shots landed, empowered hits and the longest hit.

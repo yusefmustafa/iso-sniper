@@ -102,7 +102,8 @@ export class Hud {
       const slot = (i: number) => {
         const n = view.names[i];
         const you = i === view.local ? ' <em>(you)</em>' : '';
-        const state = !n ? '<span class="wait">joining…</span>' : view.ready[i] ? '<span class="ok">READY</span>' : '<span class="wait">not ready</span>';
+        const state = !n ? '<span class="wait">joining…</span>' : i === 0 ? '<span class="ok">HOST</span>'
+          : view.ready[i] ? '<span class="ok">READY</span>' : '<span class="wait">not ready</span>';
         return `<div class="slot" style="--c:${hex(PLAYER_COLORS[i])}"><b>${n ? escapeHtml(n) : '…'}</b>${you}${state}</div>`;
       };
       const meReady = view.ready[view.local];
@@ -110,11 +111,13 @@ export class Hud {
       if (view.nameTaken) {
         actions = `<p class="hint warn">Your opponent already uses that name. Pick another.</p>${nameBox(view.name, 'rename', 'Use this name')}`;
       } else {
-        actions = btn('ready', meReady ? 'Not ready' : 'Ready', !meReady);
-        if (view.isHost) actions += `<button data-id="start" class="primary start" ${view.canStart ? '' : 'disabled'}>Start match</button>`;
-        const both = view.ready[0] && view.ready[1] && view.names[1];
-        actions += `<p class="hint">${view.isHost ? (both ? 'Everyone is ready. Start when you like.' : 'The match can start once both players are ready.')
-          : (both ? 'Waiting for the host to start…' : 'Ready up. The host starts the match once both of you are ready.')}</p>`;
+        // The host is always ready and starts the match; the guest readies up.
+        const guestReady = !!view.names[1] && view.ready[1];
+        if (view.isHost) actions = `<button data-id="start" class="primary start" ${view.canStart ? '' : 'disabled'}>Start match</button>`;
+        else actions = btn('ready', meReady ? 'Not ready' : 'Ready', !meReady);
+        actions += `<p class="hint">${view.isHost
+          ? (guestReady ? 'Your opponent is ready. Start when you like.' : view.names[1] ? 'Waiting for your opponent to ready up…' : 'Waiting for your opponent…')
+          : (guestReady ? 'Waiting for the host to start…' : 'Ready up, then the host starts the match.')}</p>`;
       }
       body = `${slot(0)}${slot(1)}${actions}${view.link && !view.names[1] ? linkBox(view.link, view.copied) : ''}${btn('cancel', 'Leave')}`;
     }
