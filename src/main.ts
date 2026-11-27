@@ -4,7 +4,8 @@ import { createTuningPanel } from './dev/tuning';
 import { KeyboardMouse } from './input/keyboardMouse';
 import { InputManager } from './input/manager';
 import { broadcastChannel, type Channel } from './net/channel';
-import { handshake } from './net/handshake';
+import { MatchLobby, type LobbyState } from './net/lobby';
+import { cleanName, nameError } from './net/names';
 import { RollbackSession } from './net/rollback';
 import { decodeCommand } from './net/codec';
 import { hashState } from './net/snapshot';
@@ -39,7 +40,15 @@ const RELAYS = params.get('relay')?.split(','); // override the public Nostr rel
 
 type Mode = 'lobby' | 'practice' | 'online';
 let mode: Mode = 'lobby';
-let lobby: LobbyView = { kind: 'menu', on: onLobby };
+const NAME_KEY = 'snipefight:name';
+let myName = (() => { try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; } })();
+const saveName = (n: string) => { myName = cleanName(n); try { localStorage.setItem(NAME_KEY, myName); } catch { /* not saved */ } };
+let lobby: LobbyView = { kind: 'menu', name: myName, on: onLobby };
+let room: MatchLobby | null = null;
+let roomId: string | null = null;
+let creator = false;
+let names: [string, string] = ['Orange', 'Blue'];
+let menuOpen = false; // the Esc menu during a match
 let state: GameState = createGame(); // rendered behind the lobby
 let prev = state.players.map((p) => ({ x: p.x, z: p.z }));
 let labels = ['P1', 'P2'];
@@ -47,7 +56,6 @@ let session: RollbackSession | null = null;
 let matchSeed = 0;
 let channel: Channel | null = null;
 let disconnect: (() => void) | null = null;
-let stopHandshake: (() => void) | null = null;
 let acc = 0;
 let last = performance.now();
 // Rollback corrections are blended out over a few frames instead of snapping.
@@ -60,55 +68,109 @@ const newRoomId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b
 const roomFromHash = () => (/^#([a-z0-9]{4,32})$/.exec(location.hash)?.[1] ?? null);
 const linkFor = (room: string) => `${location.origin}${location.pathname}${location.search}#${room}`;
 
-function onLobby(id: string) {
-  if (id === 'create') {
-    const room = newRoomId();
-    history.replaceState(null, '', `#${room}`);
-    sessionStorage.setItem('snipefight:created', room);
-    goOnline(room, true);
+const menu = (message?: string): LobbyView => ({ kind: 'menu', name: myName, message, on: onLobby });
+
+function onLobby(id: string, value?: string) {
+  if (id === 'name') {
+    if (value !== undefined) myName = value; // typed, not yet validated or saved
+  } else if (id === 'create' || id === 'join') {
+    if (value === undefined || nameError(value)) return;
+    saveName(value);
+    if (id === 'create') {
+      const r = newRoomId();
+      history.replaceState(null, '', `#${r}`);
+      sessionStorage.setItem('snipefight:created', r);
+      goOnline(r, true);
+    } else {
+      const r = roomFromHash();
+      if (r) goOnline(r, sessionStorage.getItem('snipefight:created') === r);
+    }
   } else if (id === 'practice') {
+    if (value !== undefined && !nameError(value)) saveName(value);
     startPractice();
-  } else if (id === 'copy' && lobby.kind === 'waiting') {
-    void navigator.clipboard?.writeText(lobby.link).catch(() => {});
+  } else if (id === 'copy' && (lobby.kind === 'waiting' || lobby.kind === 'room') && roomId) {
+    void navigator.clipboard?.writeText(linkFor(roomId)).catch(() => {});
     lobby = { ...lobby, copied: true };
+  } else if (id === 'ready' && room && room.state.local !== null) {
+    room.setReady(!room.state.ready[room.state.local]);
+  } else if (id === 'start' && room) {
+    room.start();
+  } else if (id === 'rename' && room && value !== undefined && !nameError(value)) {
+    saveName(value);
+    room.rename(value);
   } else if (id === 'cancel') {
     leaveOnline();
+    roomId = null;
     history.replaceState(null, '', location.pathname + location.search);
-    lobby = { kind: 'menu', on: onLobby };
+    lobby = menu();
   }
 }
 
-function goOnline(room: string, creator: boolean) {
+function roomView(s: LobbyState): LobbyView {
+  const copied = lobby.kind === 'room' || lobby.kind === 'waiting' ? lobby.copied : false;
+  return {
+    kind: 'room', link: creator && roomId ? linkFor(roomId) : null, local: s.local ?? 1, names: s.names, ready: s.ready,
+    isHost: !!room?.isHost, canStart: !!room?.canStart, nameTaken: s.nameTaken, name: myName, copied, on: onLobby,
+  };
+}
+
+const FULL = 'This match already has two players. Ask for a new link, or create your own match.';
+
+function goOnline(r: string, isCreator: boolean) {
   leaveOnline();
+  roomId = r;
+  creator = isCreator;
   mode = 'lobby';
-  lobby = creator
-    ? { kind: 'waiting', link: linkFor(room), status: 'Waiting for your opponent to open the link…', copied: false, on: onLobby }
+  setPlaying(false);
+  lobby = isCreator
+    ? { kind: 'waiting', link: linkFor(r), copied: false, on: onLobby }
     : { kind: 'connecting', status: 'Connecting to your opponent…', on: onLobby };
 
   const opened = (ch: Channel) => {
     channel = ch;
-    lobby = { kind: 'connecting', status: 'Connected. Starting…', on: onLobby };
-    ch.onClose(() => endOnline('Your opponent left the match.'));
-    stopHandshake = handshake(ch, { creator, config: { ...config } }, (setup) => {
-      savedConfig = { ...config };
-      Object.assign(config, setup.config);
-      startOnline(ch, setup.localPlayer, setup.seed);
-    }, (why) => endOnline(why));
+    lobby = { kind: 'connecting', status: 'Connected…', on: onLobby };
+    ch.onClose(() => opponentLeft());
+    // 'bye' arrives at once when they leave or close the tab; onClose can take a while after a tab dies.
+    ch.onMessage((m) => { if (m.t === 'bye' && channel === ch) opponentLeft(); });
+    room = new MatchLobby(ch, { creator: isCreator, name: myName, config: { ...config } }, {
+      onState: (st) => { if (mode === 'lobby') lobby = roomView(st); },
+      onStart: (setup) => {
+        savedConfig = { ...config };
+        Object.assign(config, setup.config);
+        names = setup.names;
+        startOnline(ch, setup.localPlayer, setup.seed);
+      },
+      onError: (why) => endOnline(why),
+    });
   };
 
   if (LOCAL_NET) {
-    disconnect = broadcastChannel(room, opened);
+    disconnect = broadcastChannel(r, opened, () => endOnline(FULL));
     return;
   }
-  disconnect = connectOnline(room, (status, ch) => {
+  disconnect = connectOnline(r, (status, ch) => {
     if (status === 'connected' && ch) opened(ch);
-    else if (status === 'full') endOnline('That match already has two players. Create a new one.');
+    else if (status === 'full') endOnline(FULL);
     else if (status === 'failed') endOnline('Could not connect directly to your opponent (a strict network or firewall can block this). Try another network.');
   }, RELAYS);
 }
 
+/** The other player closed the tab or left. The creator keeps the link open for a new opponent. */
+function opponentLeft() {
+  const other = room?.isHost === false || (session && session.local === 1) ? 0 : 1;
+  const who = (session ? names[other] : room?.state.names[other]) ?? 'Your opponent';
+  const r = roomId;
+  if (creator && r) {
+    goOnline(r, true);
+    if (lobby.kind === 'waiting') lobby = { ...lobby, message: `${who} left. Your link still works: send it again.` };
+  } else {
+    // The host owns the room: when they leave, it closes for the guest.
+    endOnline(`${who} left, so the match was closed.`);
+  }
+}
+
 function leaveOnline() {
-  stopHandshake?.(); stopHandshake = null;
+  room?.stop(); room = null;
   channel?.sendReliable({ t: 'bye' });
   channel?.close(); channel = null;
   disconnect?.(); disconnect = null;
@@ -118,6 +180,7 @@ function leaveOnline() {
 
 /** Capture the mouse and hide the OS cursor while a match runs. */
 function setPlaying(on: boolean) {
+  menuOpen = false;
   kbm.lockEnabled = on;
   document.body.classList.toggle('playing', on);
   if (!on) document.exitPointerLock?.();
@@ -126,15 +189,16 @@ function setPlaying(on: boolean) {
 function toMenu(message?: string) {
   mode = 'lobby';
   setPlaying(false);
-  lobby = { kind: 'menu', message, on: onLobby };
+  lobby = menu(message);
 }
 
 function endOnline(message: string) {
   leaveOnline();
   mode = 'lobby';
   setPlaying(false);
+  roomId = null;
   history.replaceState(null, '', location.pathname + location.search);
-  lobby = { kind: 'menu', message, on: onLobby };
+  lobby = menu(message);
 }
 
 // ---------------------------------------------------------------- matches
@@ -144,7 +208,7 @@ function startOnline(ch: Channel, localPlayer: number, seed: number) {
   state = createGame({ seed });
   session = new RollbackSession(state, localPlayer, ch, config, { inputDelay: INPUT_DELAY });
   if (params.has('debug')) session.history = new Map();
-  labels = localPlayer === 0 ? ['YOU', 'RIVAL'] : ['RIVAL', 'YOU'];
+  labels = [...names];
   prev = state.players.map((p) => ({ x: p.x, z: p.z }));
   offsets.forEach((o) => { o.x = 0; o.z = 0; });
   mode = 'online';
@@ -159,6 +223,7 @@ function startPractice() {
   state = createGame({ seed: (Math.random() * 2 ** 31) | 0, dummyP2: true });
   prev = state.players.map((p) => ({ x: p.x, z: p.z }));
   labels = ['YOU', 'DUMMY'];
+  names = ['Orange', 'Blue'];
   mode = 'practice';
   setPlaying(true);
   hud.hideJoin();
@@ -168,17 +233,32 @@ function startPractice() {
 function handleEvents(events: SimEvent[]) {
   renderer.onEvents(events, state);
   sfx.play(events);
-  const rematch = 'Press Enter or Start for a rematch';
   for (const e of events) {
     if (e.type === 'roundStart') hud.flash(`ROUND ${e.round}`, '', 0.9);
-    if (e.type === 'countdown') hud.flash(e.secondsLeft === 0 ? 'DUEL' : String(e.secondsLeft), '', e.secondsLeft === 0 ? 0.6 : 0.9);
-    if (e.type === 'roundWon') hud.flash(`${labels[e.player]} TAKE${labels[e.player] === 'YOU' ? '' : 'S'} THE ROUND`, `${e.score[0]} - ${e.score[1]}`, 2);
-    if (e.type === 'matchWon') hud.flash(labels[e.player] === 'YOU' ? 'YOU WIN' : `${labels[e.player]} WINS`, rematch, 9999);
+    if (e.type === 'countdown') hud.flash(e.secondsLeft === 0 ? 'FIGHT' : String(e.secondsLeft), '', e.secondsLeft === 0 ? 0.6 : 0.9);
+    // Practice names the colors ("ORANGE WINS"); online uses the players' names.
+    const winner = names[('player' in e ? e.player : 0) as number]?.toUpperCase();
+    if (e.type === 'roundWon') hud.flash(`${winner} WINS`, `${e.score[0]} - ${e.score[1]}`, 2);
+    if (e.type === 'matchWon') hud.flash(`${winner} WINS THE MATCH`, '', 2.8); // the results card follows
   }
 }
 
-// Esc frees the mouse (browser pointer lock); while it is free a "Leave match" button shows.
+// Esc frees the mouse (browser pointer lock) and opens the menu; Resume captures it again.
 const leaveMatch = () => (mode === 'online' ? endOnline('You left the match.') : toMenu());
+let wasLocked = false;
+document.addEventListener('pointerlockchange', () => {
+  if (kbm.locked) menuOpen = false;
+  else if (wasLocked && mode !== 'lobby') menuOpen = true;
+  wasLocked = kbm.locked;
+});
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && mode !== 'lobby' && !kbm.locked && !settingsUi.open) menuOpen = !menuOpen;
+});
+function onPause(id: string) {
+  if (id === 'resume') { menuOpen = false; kbm.capture(); }
+  else if (id === 'settings') settingsUi.show();
+  else if (id === 'leave') leaveMatch();
+}
 
 function tick() {
   if (mode === 'online' && session) {
@@ -260,27 +340,36 @@ function frame(now: number) {
     const sources = s.players.map((_, i) => (i === me ? { mouse: input.active === kbm ? kbm.cursor : null } : null));
     cursor.draw(s, renderer.positions, sources, toScreen, renderer.screenToWorld, dt);
   }
-  hud.setLeave(mode !== 'lobby' && !kbm.locked, leaveMatch);
-  settingsUi.setAvailable(mode === 'lobby' || !kbm.locked);
+  const over = mode !== 'lobby' && state.phase === 'matchEnd' && state.slowmoTicks === 0;
+  hud.setResults(over ? { names, state, rematch: mode === 'online' ? 'Either player presses Enter or Start for a rematch.' : 'Press Enter or Start to play again.' } : null);
+  const paused = mode !== 'lobby' && menuOpen && !kbm.locked && !settingsUi.open;
+  hud.setPause(paused ? { note: mode === 'online' ? 'The match keeps running while this menu is open.' : '', on: onPause } : null);
+  settingsUi.setAvailable(mode === 'lobby');
   // The roll direction setting is a game rule; online matches run on the host's copy of the config.
   if (mode !== 'online') config.rollTowardCursor = settings.rollDirection === 'cursor' ? 1 : 0;
   updateNetHud();
   requestAnimationFrame(frame);
 }
 
-// Opening a match link joins it directly.
-const linkedRoom = roomFromHash();
-if (linkedRoom) goOnline(linkedRoom, sessionStorage.getItem('snipefight:created') === linkedRoom);
+// Opening a match link asks for a name first, then joins.
+const showInvite = () => { lobby = { kind: 'invite', name: myName, on: onLobby }; };
+if (roomFromHash()) {
+  // The creator reloading their own tab goes straight back to waiting.
+  if (sessionStorage.getItem('snipefight:created') === roomFromHash() && !nameError(myName)) goOnline(roomFromHash()!, true);
+  else showInvite();
+}
 window.addEventListener('hashchange', () => {
-  const room = roomFromHash();
-  if (room && mode === 'lobby' && !channel) goOnline(room, false);
+  if (roomFromHash() && mode === 'lobby' && !channel) showInvite();
 });
+
+// Tell the other player right away when this tab closes.
+window.addEventListener('pagehide', () => channel?.sendReliable({ t: 'bye' }));
 
 requestAnimationFrame(frame);
 
 // Handle for automated smoke tests and debugging in the console.
 (window as unknown as { __iso: unknown }).__iso = {
-  get state() { return state; }, get mode() { return mode; }, get session() { return session; }, get lobby() { return lobby; }, config, renderer, settings,
+  get state() { return state; }, get mode() { return mode; }, get session() { return session; }, get lobby() { return lobby; }, get room() { return room; }, config, renderer, settings,
   /** Replay a session's recorded inputs offline and hash the state at `frame` (desync debugging). */
   replayState(frame: number) {
     if (!session?.history) return null;

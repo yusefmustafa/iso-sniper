@@ -104,10 +104,11 @@ export class SettingsUi {
 
   get open() { return !this.panel.hidden; }
 
-  /** Show the button only while the mouse is free (lobby, or Esc during a match). */
+  show() { this.toggle(true); }
+
+    /** The corner button shows on the front screen; during a match Settings is in the Esc menu. */
   setAvailable(on: boolean) {
     this.button.style.display = on && this.panel.hidden ? 'block' : 'none';
-    if (!on) this.toggle(false);
   }
 
   private toggle(open: boolean) {

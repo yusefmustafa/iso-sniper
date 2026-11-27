@@ -28,7 +28,9 @@ export function connectOnline(roomId: string, onStatus: (s: OnlineStatus, ch?: C
   const deliver = (m: NetMessage) => handlers.forEach((h) => h(m));
 
   action.onMessage((data, ctx) => {
-    if (ctx.peerId === peerId) deliver(data as NetMessage);
+    if (ctx.peerId !== peerId) return;
+    if ((data as NetMessage).t === 'full') { onStatus('full'); return; }
+    deliver(data as NetMessage);
   });
 
   const ch: Channel = {
@@ -43,7 +45,8 @@ export function connectOnline(roomId: string, onStatus: (s: OnlineStatus, ch?: C
   };
 
   room.onPeerJoin(({ peerId: id }) => {
-    if (peerId) return;
+    // Two players per link. Anyone else who opens it is told the match is full.
+    if (peerId) { void action.send({ t: 'full' }, { target: id }).catch(() => {}); return; }
     peerId = id;
     const pc = room.getPeers()[id]?.connection;
     if (pc) {

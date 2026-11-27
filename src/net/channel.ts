@@ -4,7 +4,7 @@
  * in-memory link with fake latency (tests).
  */
 export interface Channel {
-  /** Ordered and guaranteed. Used for the handshake. */
+  /** Ordered and guaranteed. Used for the lobby and the match start. */
   sendReliable(msg: NetMessage): void;
   /** May drop or reorder. Used for the 60 Hz input stream, which carries its own redundancy. */
   sendFast(msg: NetMessage): void;
@@ -16,12 +16,18 @@ export interface Channel {
 import type { WireCmd } from './codec';
 import type { Config } from '../config';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export type NetMessage =
-  | { t: 'hello'; v: number; host: boolean; nonce: number }
-  | { t: 'start'; v: number; seed: number; config: Config; hostIsP1: true }
+  // Pre-match room (see lobby.ts). The host owns names and ready flags.
+  | { t: 'hello'; v: number; host: boolean; nonce: number; name: string }
+  | { t: 'rename'; name: string }
+  | { t: 'nameTaken' }
+  | { t: 'ready'; ready: boolean }
+  | { t: 'lobby'; names: [string | null, string | null]; ready: [boolean, boolean] }
+  | { t: 'start'; v: number; seed: number; config: Config; names: [string, string] }
   | { t: 'go' }
+  | { t: 'full' } // sent to a third person who opens the same link
   | {
       t: 'in';
       f: number; // frame of c[0]
@@ -80,7 +86,7 @@ export function loopbackPair(opts: { latencyMs: number; jitterMs?: number; loss?
 }
 
 /** Two browser tabs on the same machine, joined by room name. Dev and automated tests only. */
-export function broadcastChannel(room: string, onOpen: (ch: Channel) => void): () => void {
+export function broadcastChannel(room: string, onOpen: (ch: Channel) => void, onFull: () => void = () => {}): () => void {
   const bc = new BroadcastChannel(`snipefight:${room}`);
   const me = Math.random().toString(36).slice(2);
   let peer: string | null = null;
@@ -97,8 +103,10 @@ export function broadcastChannel(room: string, onOpen: (ch: Channel) => void): (
     const d = e.data as { from: string; to: string | null; hi?: boolean; bye?: boolean; msg?: NetMessage };
     if (d.hi) {
       if (peer === null) { peer = d.from; bc.postMessage({ from: me, hi: true }); onOpen(ch); }
+      else if (d.from !== peer) bc.postMessage({ from: me, to: d.from, msg: { t: 'full' } }); // a third tab
       return;
     }
+    if (d.to === me && d.msg?.t === 'full' && peer === null) { onFull(); return; }
     if (d.from !== peer || d.to !== me) return;
     if (d.bye) closers.forEach((c) => c('left'));
     else if (d.msg) handlers.forEach((h) => h(d.msg!));

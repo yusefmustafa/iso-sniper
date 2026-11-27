@@ -2,7 +2,7 @@ import { config as defaultConfig, type Config } from '../config';
 import { defaultArena, rayToCircle, rayToWorld, resolveCircle } from './arena';
 import { datan2, dcos, dhypot, dsin } from './dmath';
 import { nextRandom } from './rng';
-import type { Command, GameState, PlayerState } from './types';
+import { emptyStats, type Command, type GameState, type PlayerState } from './types';
 
 /**
  * The game rules. step() is a pure function of (state, commands, config):
@@ -29,7 +29,7 @@ function newPlayer(id: number, state: GameState, dummy: boolean, cfg: Config): P
 export function createGame(opts: { seed?: number; dummyP2?: boolean } = {}, cfg: Config = defaultConfig): GameState {
   const state: GameState = {
     tick: 0, seed: opts.seed ?? 12345, phase: 'countdown', phaseTicks: secToTicks(cfg.countdownTime, cfg),
-    round: 1, score: [0, 0], hitstop: 0, slowmoTicks: 0, players: [], arena: defaultArena(), events: [],
+    round: 1, score: [0, 0], hitstop: 0, slowmoTicks: 0, players: [], stats: emptyStats(), arena: defaultArena(), events: [],
   };
   state.players = [newPlayer(0, state, false, cfg), newPlayer(1, state, !!opts.dummyP2, cfg)];
   state.events.push({ type: 'roundStart', round: 1 });
@@ -342,8 +342,12 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
   }
 
   // A shot that hits an invulnerable player stops on them but does nothing.
+  state.stats.shots[p.id]++;
   if (hit !== null && state.players[hit].invulnTicks === 0) {
     const o = state.players[hit];
+    state.stats.hits[p.id]++;
+    if (charged) state.stats.charged[p.id]++;
+    state.stats.longest[p.id] = Math.max(state.stats.longest[p.id], dist);
     const damage = charged ? cfg.chargedDamage : 1;
     o.hp = Math.max(0, o.hp - damage);
     o.knockX = dx * cfg.knockback / cfg.knockbackTime;
@@ -377,6 +381,7 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
 /** Start a fresh match keeping the same players (and dummy setting). */
 export function restartMatch(state: GameState, cfg: Config = defaultConfig): void {
   state.score = [0, 0];
+  state.stats = emptyStats();
   state.round = 1;
   state.hitstop = 0;
   state.slowmoTicks = 0;
