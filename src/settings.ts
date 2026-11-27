@@ -6,7 +6,7 @@ export interface Settings {
   /** 'cursor': the hip-fire cone ends at the cursor. 'full': it runs on to the first wall, as the bullet does. */
   coneLength: 'cursor' | 'full';
   /** With the full cone (which always runs to the arena edge): grey out the part behind cover, or color all of it. */
-  coneWalls: 'stop' | 'through';
+  coneWalls: 'stop' | 'hatch' | 'cut' | 'percent' | 'through';
   /** Where the body faces while sprinting: snaps to the run direction, turns toward it, or keeps facing the cursor. */
   sprintFacing: 'snap' | 'turn' | 'aim';
   /** How the rifle is carried while sprinting. */
@@ -46,9 +46,12 @@ const choices: Choice<keyof Settings>[] = [
     options: [{ value: 'full', label: 'Full range' }, { value: 'cursor', label: 'Stop at cursor' }],
   },
   {
-    key: 'coneWalls', label: 'Full cone at walls', dev: true,
-    hint: 'Grey out the part of the cone behind cover, or color it all the way to the arena edge.',
-    options: [{ value: 'stop', label: 'Grey out blocked' }, { value: 'through', label: 'Color it all' }],
+    key: 'coneWalls', label: 'Cone behind cover', dev: true,
+    hint: 'How the part of the cone that cover blocks is drawn.',
+    options: [
+      { value: 'stop', label: 'A: Grey' }, { value: 'hatch', label: 'B: Red hatch' }, { value: 'cut', label: 'C: Cut + edge' },
+      { value: 'percent', label: 'D: % clear' }, { value: 'through', label: 'Ignore cover' },
+    ],
   },
   {
     key: 'rollDirection', label: 'Roll direction', dev: true,
