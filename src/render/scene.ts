@@ -21,7 +21,7 @@ interface PlayerView {
   ring: THREE.Mesh;
 }
 
-const MUZZLE_REACH = 1.35; // muzzle distance in front of the character, for the laser
+const MUZZLE_REACH = 1.68; // muzzle distance in front of the character, for the laser
 const MUZZLE_SIDE = 0.13; // muzzle offset to the character's right
 
 interface Tracer { mesh: THREE.Mesh; life: number; max: number }

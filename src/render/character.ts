@@ -22,8 +22,8 @@ const SHIN = 0.42;
 const PIVOT_Y = 0.95; // roll pivot: the middle of the tucked ball
 const WAIST_Y = 1.04; // the upper body curls forward around this
 const BALL_HEIGHT = 0.55; // pivot height above the floor at full tuck
-const UPPER_ARM = 0.29;
-const FOREARM = 0.29;
+const UPPER_ARM = 0.35;
+const FOREARM = 0.35;
 const TAU = Math.PI * 2;
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -68,7 +68,7 @@ export class Character {
     const accent = new THREE.MeshStandardMaterial({ color: c, roughness: 0.4, metalness: 0.3, emissive: c, emissiveIntensity: 0.6 });
     const joint = new THREE.MeshStandardMaterial({ color: 0x2b2f38, roughness: 0.6, metalness: 0.4 });
     const metal = new THREE.MeshStandardMaterial({ color: 0x1d2026, roughness: 0.45, metalness: 0.7 });
-    const polymer = new THREE.MeshStandardMaterial({ color: 0x3b4049, roughness: 0.75, metalness: 0.1 });
+    const tan = new THREE.MeshStandardMaterial({ color: 0xa48d62, roughness: 0.75, metalness: 0.05 });
     const lens = new THREE.MeshStandardMaterial({ color: 0x0a0c10, roughness: 0.1, metalness: 0.9, emissive: c, emissiveIntensity: 0.35 });
     this.materials = [shell, accent];
 
@@ -125,32 +125,44 @@ export class Character {
       this.legs.push({ hip, knee, ankle });
     }
 
-    // ---- rifle: pivot at the right shoulder pocket, barrel along +X
+    // ---- rifle: a chassis bolt-action sniper. Pivot at the right shoulder pocket, barrel along +X.
+    // Tan furniture and a fat scope so it reads as a sniper (not a stick) against the floor and the white body.
     const g = this.gun;
-    g.position.set(0.02, SHOULDER_HEIGHT, 0.13);
-    add(g, new THREE.BoxGeometry(0.3, 0.1, 0.05), polymer, -0.05, -0.03, 0); // stock
-    add(g, new THREE.BoxGeometry(0.16, 0.04, 0.05), polymer, -0.04, 0.035, 0); // cheek rest
-    add(g, new THREE.BoxGeometry(0.03, 0.14, 0.06), joint, -0.2, -0.03, 0); // butt pad
-    add(g, new THREE.BoxGeometry(0.34, 0.075, 0.065), metal, 0.25, 0, 0); // receiver
-    const grip = add(g, new THREE.BoxGeometry(0.05, 0.12, 0.045), polymer, 0.13, -0.08, 0);
+    g.position.set(0.2, SHOULDER_HEIGHT, 0.13);
+    g.scale.set(1, 1.3, 1.3); // chunkier cross-section so it still reads at game zoom (length unchanged)
+    add(g, new THREE.BoxGeometry(0.04, 0.17, 0.07), joint, -0.25, -0.04, 0); // butt pad
+    add(g, new THREE.BoxGeometry(0.24, 0.05, 0.06), tan, -0.12, -0.095, 0); // stock, lower spine
+    add(g, new THREE.BoxGeometry(0.22, 0.06, 0.065), tan, -0.11, 0.04, 0); // stock, cheek riser (gap below = thumbhole)
+    add(g, new THREE.BoxGeometry(0.05, 0.19, 0.06), tan, -0.2, -0.03, 0); // stock, rear upright
+    add(g, new THREE.BoxGeometry(0.06, 0.12, 0.06), tan, 0.03, -0.04, 0); // stock, wrist
+    add(g, new THREE.BoxGeometry(0.42, 0.095, 0.078), tan, 0.27, 0, 0); // chassis / receiver
+    const grip = add(g, new THREE.BoxGeometry(0.05, 0.13, 0.05), metal, 0.1, -0.1, 0);
     grip.rotation.z = 0.35;
-    add(g, new THREE.BoxGeometry(0.07, 0.09, 0.05), metal, 0.27, -0.075, 0); // magazine
-    add(g, alongX(new THREE.CylinderGeometry(0.03, 0.03, 0.32, 12)), polymer, 0.56, 0, 0); // handguard
-    add(g, alongX(new THREE.CylinderGeometry(0.014, 0.016, 0.62, 10)), metal, 0.98, 0, 0); // barrel
-    add(g, new THREE.BoxGeometry(0.07, 0.035, 0.045), metal, 1.31, 0, 0); // muzzle brake
-    add(g, new THREE.SphereGeometry(0.018, 8, 6), metal, 0.18, 0.02, 0.05); // bolt handle
-    // Scope: tube, eyepiece and objective bell, on two rings
-    add(g, alongX(new THREE.CylinderGeometry(0.026, 0.026, 0.3, 14)), metal, 0.24, 0.085, 0);
-    add(g, alongX(new THREE.CylinderGeometry(0.034, 0.03, 0.06, 14)), metal, 0.08, 0.085, 0);
-    add(g, alongX(new THREE.CylinderGeometry(0.044, 0.03, 0.08, 14)), metal, 0.42, 0.085, 0);
-    add(g, alongX(new THREE.CylinderGeometry(0.04, 0.04, 0.006, 14)), lens, 0.463, 0.085, 0);
-    for (const x of [0.17, 0.32]) add(g, new THREE.BoxGeometry(0.025, 0.05, 0.04), metal, x, 0.05, 0);
-    add(g, new THREE.BoxGeometry(0.12, 0.012, 0.05), accent, 0.56, -0.034, 0); // color strip under the handguard
+    add(g, new THREE.BoxGeometry(0.09, 0.012, 0.03), metal, 0.17, -0.07, 0); // trigger guard
+    const mag = add(g, new THREE.BoxGeometry(0.09, 0.12, 0.062), metal, 0.31, -0.1, 0); // box magazine
+    mag.rotation.z = 0.08;
+    add(g, new THREE.CylinderGeometry(0.01, 0.01, 0.08, 8).rotateX(Math.PI / 2), metal, 0.2, 0.025, 0.07); // bolt
+    add(g, new THREE.SphereGeometry(0.024, 10, 8), metal, 0.2, 0.025, 0.11); // bolt knob
+    add(g, new THREE.BoxGeometry(0.36, 0.08, 0.072), tan, 0.66, -0.005, 0); // handguard
+    add(g, new THREE.BoxGeometry(0.36, 0.016, 0.04), metal, 0.66, 0.042, 0); // top rail
+    add(g, new THREE.BoxGeometry(0.2, 0.022, 0.074), accent, 0.66, -0.01, 0); // player-color band
+    for (const z of [-0.022, 0.022]) add(g, alongX(new THREE.CylinderGeometry(0.011, 0.011, 0.3, 8)), metal, 0.68, -0.06, z); // folded bipod legs
+    add(g, new THREE.BoxGeometry(0.04, 0.03, 0.06), metal, 0.83, -0.05, 0); // bipod hinge
+    add(g, alongX(new THREE.CylinderGeometry(0.019, 0.023, 0.56, 12)), metal, 1.12, 0, 0); // barrel
+    add(g, new THREE.BoxGeometry(0.12, 0.055, 0.06), metal, 1.45, 0, 0); // muzzle brake
+    // Scope: big objective bell, turrets, two rings
+    add(g, alongX(new THREE.CylinderGeometry(0.033, 0.033, 0.36, 16)), metal, 0.31, 0.11, 0);
+    add(g, alongX(new THREE.CylinderGeometry(0.042, 0.035, 0.09, 16)), metal, 0.1, 0.11, 0); // eyepiece
+    add(g, alongX(new THREE.CylinderGeometry(0.058, 0.034, 0.11, 16)), metal, 0.54, 0.11, 0); // objective bell
+    add(g, alongX(new THREE.CylinderGeometry(0.052, 0.052, 0.006, 16)), lens, 0.597, 0.11, 0);
+    add(g, new THREE.CylinderGeometry(0.02, 0.02, 0.045, 10), metal, 0.31, 0.155, 0); // elevation turret
+    add(g, new THREE.CylinderGeometry(0.018, 0.018, 0.04, 10).rotateX(Math.PI / 2), metal, 0.31, 0.11, 0.05); // windage turret
+    for (const x of [0.22, 0.4]) add(g, new THREE.BoxGeometry(0.03, 0.06, 0.05), metal, x, 0.065, 0); // rings
     u.add(g);
 
     // Scope glint (shows when the empowered shot is ready)
     this.glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: glintTexture, color: 0xffffff, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
-    this.glint.position.set(0.48, 0.085, 0);
+    this.glint.position.set(0.62, 0.11, 0);
     this.glint.renderOrder = 10;
     this.glint.visible = false;
     g.add(this.glint);
@@ -165,8 +177,8 @@ export class Character {
         elbow: add(u, new THREE.SphereGeometry(0.055, 10, 8), joint),
         hand: add(u, new THREE.SphereGeometry(0.05, 10, 8), joint),
         // Right hand on the pistol grip, left hand under the handguard.
-        grip: side === 1 ? new THREE.Vector3(0.13, -0.06, 0.0) : new THREE.Vector3(0.52, -0.04, 0),
-        pole: side === 1 ? new THREE.Vector3(-0.3, -1, 0.8) : new THREE.Vector3(0.1, -1, -0.7),
+        grip: side === 1 ? new THREE.Vector3(0.11, -0.08, 0.0) : new THREE.Vector3(0.44, -0.06, 0),
+        pole: side === 1 ? new THREE.Vector3(-0.4, -1, 0.35) : new THREE.Vector3(0.1, -1, -0.5),
       });
     }
   }
@@ -391,12 +403,12 @@ const _free = new THREE.Vector3();
 
 interface GunPose { pos: [number, number, number]; rot: [number, number, number] }
 /** Shouldered, barrel along the aim. */
-const AIM_POSE: GunPose = { pos: [0.02, SHOULDER_HEIGHT, 0.13], rot: [0, 0, 0] };
+const AIM_POSE: GunPose = { pos: [0.2, SHOULDER_HEIGHT, 0.13], rot: [0, 0, 0] };
 /** Tucked across the chest during a roll so it rolls with the body. */
-const ROLL_POSE: GunPose = { pos: [-0.1, SHOULDER_HEIGHT, 0.13], rot: [0, -1.25, -0.5] };
+const ROLL_POSE: GunPose = { pos: [0.05, SHOULDER_HEIGHT, 0.13], rot: [0, -1.25, -0.5] };
 /** Sprint carries. Euler order XYZ: rot[2] pitches the barrel, then rot[1] swings it (positive = toward the left side). */
 const CARRY_POSES: Record<'port' | 'low' | 'onehand', GunPose> = {
   port: { pos: [0.24, SHOULDER_HEIGHT - 0.18, 0.04], rot: [0.25, 1.3, 0.32] }, // across the chest, muzzle up and to the left
-  low: { pos: [0.02, SHOULDER_HEIGHT, 0.13], rot: [0, 0, -0.85] }, // low ready, muzzle down in front
-  onehand: { pos: [0.08, SHOULDER_HEIGHT - 0.4, 0.27], rot: [0, 0, -0.25] }, // in the right hand at the hip
+  low: { pos: [0.16, SHOULDER_HEIGHT - 0.03, 0.13], rot: [0, 0, -0.62] }, // low ready, muzzle down in front
+  onehand: { pos: [0.2, SHOULDER_HEIGHT - 0.4, 0.27], rot: [0, 0, -0.25] }, // in the right hand at the hip
 };

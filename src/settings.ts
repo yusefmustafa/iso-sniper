@@ -18,8 +18,8 @@ export interface Settings {
   rollDirection: 'move' | 'cursor';
 }
 
-const KEY = 'iso-sniper:settings:v2'; // v2: the full cone became the default
-const defaults: Settings = { coneLength: 'full', coneWalls: 'stop', sprintFacing: 'turn', sprintCarry: 'port', rollDirection: 'move' };
+const KEY = 'iso-sniper:settings:v3'; // bumped when a default changes (v2 full cone, v3 low-ready sprint)
+const defaults: Settings = { coneLength: 'full', coneWalls: 'stop', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move' };
 
 function load(): Settings {
   try {
