@@ -96,9 +96,14 @@ body.playing #game { cursor: none; }
 
 .controls { width: min(400px, 100%); background: rgba(10, 12, 16, 0.82); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
   padding: 20px 22px; font-size: 13px; }
-.controls h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; }
+.controls h2 { margin: 0; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; }
+.controls-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.controls .tabs { display: flex; border: 1px solid rgba(255,255,255,0.16); border-radius: 999px; overflow: hidden; }
+.controls .tabs button { font: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; color: var(--quiet); background: transparent;
+  border: 0; cursor: pointer; }
+.controls .tabs button[aria-selected='true'] { background: #ff8a3d; color: #1a1209; }
+.controls[data-scheme='kbm'] table[data-for='pad'], .controls[data-scheme='pad'] table[data-for='kbm'] { display: none; }
 .controls table { width: 100%; border-collapse: collapse; }
-.controls th { text-align: left; font-size: 11px; color: var(--quiet); font-weight: 600; padding: 0 0 6px; }
 .controls td { padding: 5px 6px 5px 0; border-top: 1px solid rgba(255,255,255,0.06); vertical-align: middle; }
 .controls td:first-child { color: var(--quiet); }
 .controls kbd { font: inherit; font-size: 12px; font-weight: 600; padding: 2px 7px; border-radius: 6px; background: rgba(255,255,255,0.08);
