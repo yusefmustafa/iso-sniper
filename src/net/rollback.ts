@@ -23,7 +23,9 @@ import { cloneState, hashState } from './snapshot';
  */
 
 export interface RollbackOptions {
-  inputDelay?: number; // frames of local input delay; trades a little latency for fewer rollbacks
+  inputDelay?: number; // starting frames of local input delay; trades a little latency for fewer rollbacks
+  /** Raise the input delay with the ping (up to this many frames), so fewer guesses about the other player are wrong. Set to `inputDelay` to keep it fixed. */
+  maxInputDelay?: number;
   maxPrediction?: number; // frames we may run ahead of the last confirmed remote input before stalling
   hashInterval?: number; // frames between desync checks
   clock?: () => number; // ms; injectable for tests
@@ -38,6 +40,8 @@ export interface NetStats {
   advantage: number; // frames we are ahead of the remote (smoothed)
   desyncFrame: number | null;
   lastHeardMs: number; // ms since the last packet
+  inputDelay: number; // frames of local input delay right now
+  stalls: number; // ticks spent waiting for the remote's inputs
 }
 
 const keyOf = (frame: number, e: SimEvent) => `${frame}:${e.type}:${'player' in e ? e.player : ''}`;
@@ -48,10 +52,15 @@ export class RollbackSession {
   prevPositions: { x: number; z: number }[];
   readonly local: number;
   readonly remote: number;
-  readonly stats: NetStats = { rttMs: 0, rollbackFrames: 0, rollbacks: 0, rollbacksPerSec: 0, stalled: false, advantage: 0, desyncFrame: null, lastHeardMs: 0 };
+  readonly stats: NetStats = { rttMs: 0, rollbackFrames: 0, rollbacks: 0, rollbacksPerSec: 0, stalled: false, advantage: 0, desyncFrame: null, lastHeardMs: 0, inputDelay: 0, stalls: 0 };
 
   private cfg: Config;
   private inputDelay: number;
+  private minInputDelay: number;
+  private maxInputDelay: number;
+  private delayCooldown = 0;
+  private lastStamped: number; // newest frame that has a local input
+  private latched = { fire: false, roll: false, start: false }; // presses seen on ticks that stamped nothing
   private maxPrediction: number;
   private hashInterval: number;
   private inputs: Map<number, WireCmd>[] = [new Map(), new Map()];
@@ -79,8 +88,11 @@ export class RollbackSession {
     this.local = localPlayer;
     this.remote = 1 - localPlayer;
     this.cfg = cfg;
-    this.inputDelay = opts.inputDelay ?? 2;
-    this.maxPrediction = opts.maxPrediction ?? 8;
+    this.inputDelay = this.minInputDelay = opts.inputDelay ?? 2;
+    this.maxInputDelay = Math.max(this.inputDelay, opts.maxInputDelay ?? 4);
+    this.stats.inputDelay = this.inputDelay;
+    // 12 frames (200 ms) of guessing before the game waits: a short freeze is worse than a correction.
+    this.maxPrediction = opts.maxPrediction ?? 12;
     this.hashInterval = opts.hashInterval ?? 60;
     this.clock = opts.clock ?? (() => performance.now());
     this.prevPositions = initial.players.map((p) => ({ x: p.x, z: p.z }));
@@ -88,6 +100,7 @@ export class RollbackSession {
     for (let f = 0; f < this.inputDelay; f++) { this.inputs[0].set(f, EMPTY_WIRE); this.inputs[1].set(f, EMPTY_WIRE); }
     this.lastRemote = this.inputDelay - 1;
     this.remoteAck = this.inputDelay - 1;
+    this.lastStamped = this.inputDelay - 1;
     channel.onMessage((m) => this.receive(m));
   }
 
@@ -113,15 +126,60 @@ export class RollbackSession {
     if (advance && this.shouldWaitForRemote(now)) advance = false;
 
     if (advance) {
-      const target = this.frame + this.inputDelay;
-      if (!this.inputs[this.local].has(target)) this.inputs[this.local].set(target, encodeCommand(localCommand));
+      this.adaptInputDelay();
+      this.stamp(localCommand);
       this.simulateFrame(events);
+    } else {
+      // Nothing new to show: hold everyone still rather than replaying the last step's motion.
+      this.prevPositions = this.state.players.map((p) => ({ x: p.x, z: p.z }));
+      this.latch(localCommand);
+      this.stats.stalls++;
     }
 
     this.checkHashes();
     this.send(now);
     this.prune();
     return events;
+  }
+
+  /** Record the local input for frame + inputDelay (filling any frames a delay increase skipped). */
+  private stamp(cmd: Command) {
+    const target = this.frame + this.inputDelay;
+    if (target <= this.lastStamped) { this.latch(cmd); return; } // the delay just went down: this tick's frame is already taken
+    const l = this.latched;
+    const c = { ...cmd, fire: cmd.fire || l.fire, roll: cmd.roll || l.roll, start: cmd.start || l.start };
+    this.latched = { fire: false, roll: false, start: false };
+    const w = encodeCommand(c);
+    for (let f = this.lastStamped + 1; f <= target; f++) this.inputs[this.local].set(f, w);
+    this.lastStamped = target;
+  }
+
+  /** A click or tap on a tick that records no input still counts on the next one. */
+  private latch(cmd: Command) {
+    this.latched.fire ||= cmd.fire;
+    this.latched.roll ||= cmd.roll;
+    this.latched.start ||= cmd.start;
+  }
+
+  /**
+   * Match the input delay to the ping. Each frame of delay is a frame the
+   * other side doesn't have to guess, so on a slow link a little delay means
+   * the opponent you aim at is where they really are, instead of a guess that
+   * gets corrected (and a shot that looked on target misses).
+   */
+  private adaptInputDelay() {
+    if (this.delayCooldown > 0) { this.delayCooldown--; return; }
+    if (this.stats.rttMs <= 0 || this.minInputDelay === this.maxInputDelay) return;
+    const oneWay = this.stats.rttMs / 2 / (1000 / this.cfg.tickRate);
+    // Hysteresis: go up while more than a frame would still be guessed, down once the ping is well under the delay.
+    let want = this.inputDelay;
+    if (oneWay > this.inputDelay + 1) want = this.inputDelay + 1;
+    else if (oneWay < this.inputDelay - 1) want = this.inputDelay - 1;
+    want = Math.max(this.minInputDelay, Math.min(this.maxInputDelay, want));
+    if (want === this.inputDelay) return;
+    this.inputDelay = want;
+    this.stats.inputDelay = want;
+    this.delayCooldown = 30;
   }
 
   private commandsFor(frame: number): Command[] {
@@ -217,7 +275,7 @@ export class RollbackSession {
 
   private send(now: number) {
     const from = this.remoteAck + 1;
-    const to = this.frame + this.inputDelay; // inclusive: the newest stamped local input
+    const to = this.lastStamped; // inclusive: the newest stamped local input
     const c: WireCmd[] = [];
     for (let f = from; f <= to && c.length < 60; f++) {
       const w = this.inputs[this.local].get(f);

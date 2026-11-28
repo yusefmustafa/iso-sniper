@@ -8,6 +8,9 @@ export class KeyboardMouse implements InputDevice {
   lockEnabled = false;
   private keys = new Set<string>();
   private buttons = new Set<number>();
+  // Presses since the last tick, so a click or tap shorter than one tick (16 ms) still registers.
+  private tappedKeys = new Set<string>();
+  private tappedButtons = new Set<number>();
   private pressedThisTick = false;
   private startThisTick = false;
   private mouseX = 0;
@@ -25,6 +28,7 @@ export class KeyboardMouse implements InputDevice {
       if (e.code === 'Backquote') { document.exitPointerLock?.(); return; } // dev panel toggle needs the cursor
       if (['Space', 'ShiftLeft', 'ShiftRight'].includes(e.code)) e.preventDefault();
       this.keys.add(e.code);
+      this.tappedKeys.add(e.code);
       this.pressedThisTick = true;
       if (e.code === 'Enter') this.startThisTick = true;
     });
@@ -39,6 +43,7 @@ export class KeyboardMouse implements InputDevice {
       }
       this.refocused = false;
       this.buttons.add(e.button);
+      this.tappedButtons.add(e.button);
       this.pressedThisTick = true;
     });
     window.addEventListener('mouseup', (e) => {
@@ -85,9 +90,9 @@ export class KeyboardMouse implements InputDevice {
     const d = screenToWorldDir(sx / len, sy / len);
     c.moveX = d.x; c.moveZ = d.z;
     c.sprint = k('ShiftLeft') || k('ShiftRight');
-    c.roll = k('Space');
-    c.fire = this.buttons.has(0);
-    c.ads = this.buttons.has(2);
+    c.roll = k('Space') || this.tappedKeys.has('Space');
+    c.fire = this.buttons.has(0) || this.tappedButtons.has(0);
+    c.ads = this.buttons.has(2) || this.tappedButtons.has(2);
     if (this.hasMouse) {
       const p = this.screenToWorld(this.mouseX, this.mouseY);
       if (p) {
@@ -102,5 +107,5 @@ export class KeyboardMouse implements InputDevice {
 
   anyPressed() { return this.pressedThisTick; }
   startPressed() { return this.startThisTick; }
-  endTick() { this.pressedThisTick = false; this.startThisTick = false; }
+  endTick() { this.pressedThisTick = false; this.startThisTick = false; this.tappedKeys.clear(); this.tappedButtons.clear(); }
 }

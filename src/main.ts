@@ -35,7 +35,8 @@ for (const ev of ['keydown', 'mousedown', 'touchstart'] as const) window.addEven
 // ?net=local connects two tabs of the same browser instead of going online (dev and tests).
 const params = new URLSearchParams(location.search);
 const LOCAL_NET = params.get('net') === 'local';
-const INPUT_DELAY = Number(params.get('delay') ?? 2);
+// `?delay=N` pins the input delay at N frames; by default it starts at 2 and rises with the ping (up to 4).
+const FIXED_DELAY = params.has('delay') ? Number(params.get('delay')) : null;
 const RELAYS = params.get('relay')?.split(','); // override the public Nostr relays (testing)
 
 type Mode = 'lobby' | 'practice' | 'online';
@@ -206,7 +207,7 @@ function endOnline(message: string) {
 function startOnline(ch: Channel, localPlayer: number, seed: number) {
   matchSeed = seed;
   state = createGame({ seed });
-  session = new RollbackSession(state, localPlayer, ch, config, { inputDelay: INPUT_DELAY });
+  session = new RollbackSession(state, localPlayer, ch, config, FIXED_DELAY === null ? { inputDelay: 2, maxInputDelay: 4 } : { inputDelay: FIXED_DELAY, maxInputDelay: FIXED_DELAY });
   if (params.has('debug')) session.history = new Map();
   labels = [...names];
   prev = state.players.map((p) => ({ x: p.x, z: p.z }));

@@ -52,6 +52,7 @@ export class GameRenderer {
   /** Interpolated player positions from the last render, for overlays. */
   positions: { x: number; z: number }[] = [];
   private arenaBuilt = false;
+  private warmed = false;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -232,6 +233,23 @@ export class GameRenderer {
     void state;
   }
 
+  /**
+   * Compile every shader the effects use before the match, so the first glint,
+   * tracer or death doesn't stall a frame while the browser compiles it.
+   */
+  private prewarm() {
+    this.spawnTracer(0, 0, 1, 0, true, 0);
+    this.spawnSparks(0, 0, 0xffffff, 1);
+    this.deaths.spawn(0, 0, PLAYER_COLORS[0], 1, 0);
+    for (const v of this.views) v.char.glint.visible = true;
+    this.renderer.compile(this.scene, this.camera);
+    for (const v of this.views) v.char.glint.visible = false;
+    for (const t of this.tracers) { this.scene.remove(t.mesh); t.mesh.geometry.dispose(); (t.mesh.material as THREE.Material).dispose(); }
+    for (const sp of this.sparks) { this.scene.remove(sp.mesh); sp.mesh.geometry.dispose(); (sp.mesh.material as THREE.Material).dispose(); }
+    this.tracers = []; this.sparks = [];
+    this.deaths.clear();
+  }
+
   private addTrauma(t: number) { this.trauma = Math.min(1, this.trauma + t); }
 
   private spawnTracer(fx: number, fz: number, tx: number, tz: number, charged: boolean, player: number) {
@@ -264,6 +282,7 @@ export class GameRenderer {
   render(state: GameState, prev: { x: number; z: number }[], alpha: number, dt: number, frozen: boolean) {
     if (!this.arenaBuilt) { this.buildArena(state); this.arenaBuilt = true; }
     while (this.views.length < state.players.length) this.views.push(this.buildPlayer(this.views.length));
+    if (!this.warmed && this.views.length >= 2) { this.prewarm(); this.warmed = true; }
     this.time += dt;
 
     const positions = this.positions = state.players.map((p, i) => ({

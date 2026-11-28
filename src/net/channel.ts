@@ -82,6 +82,8 @@ export function loopbackPair(opts: { latencyMs: number; jitterMs?: number; loss?
       }
     },
     get now() { return now; },
+    /** Change the one-way latency from now on (tests). */
+    setLatency(ms: number) { opts.latencyMs = ms; },
   };
 }
 
