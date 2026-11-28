@@ -13,9 +13,9 @@ export const config = {
   roundsToWin: 3,
 
   // Movement
-  walkSpeed: 4.5,
-  sprintSpeed: 7.5,
-  adsSpeed: 1.5,
+  walkSpeed: 4.725, // movement speeds were +5% on 2026-11-28 (from 4.5 / 7.5 / 1.5, roll 5 m)
+  sprintSpeed: 7.875,
+  adsSpeed: 1.575,
   accelTime: 0.08, // time to reach full speed from rest
   stopTime: 0.06, // time to stop from full speed
   sprintRampTime: 0.15,
@@ -24,7 +24,7 @@ export const config = {
   kneelRadius: 0.3,
 
   // Roll
-  rollDistance: 5,
+  rollDistance: 5.25, // same roll time, so the roll is 5% faster
   rollTime: 0.45,
   rollCooldown: 1.0,
   rollEndSpeedFactor: 0.4, // speed at the very end of the roll, relative to peak (about walking speed)
