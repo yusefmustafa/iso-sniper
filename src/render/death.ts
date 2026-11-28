@@ -8,7 +8,7 @@ import * as THREE from 'three';
 
 interface Chunk { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; life: number; max: number; resting: boolean }
 interface Puff { sprite: THREE.Sprite; vel: THREE.Vector3; delay: number; life: number; max: number; grow: number; peak: number }
-interface Flash { mesh: THREE.Mesh; light: THREE.PointLight; life: number; max: number }
+interface Flash { mesh: THREE.Mesh; life: number; max: number }
 interface Scorch { mesh: THREE.Mesh; life: number; max: number }
 
 export class DeathFx {
@@ -19,16 +19,22 @@ export class DeathFx {
   private smokeTex = smokeTexture();
   private chunkGeo = [new THREE.BoxGeometry(0.16, 0.12, 0.14), new THREE.BoxGeometry(0.1, 0.1, 0.22), new THREE.SphereGeometry(0.09, 8, 6), new THREE.BoxGeometry(0.22, 0.07, 0.12)];
 
-  constructor(private scene: THREE.Scene) {}
+  // One light, always in the scene and dark until a death. Adding or removing a light makes
+  // three.js rebuild the shader of every lit material, which froze the game for a moment.
+  private light = new THREE.PointLight(0xffa860, 0, 9, 2);
+
+  constructor(private scene: THREE.Scene) {
+    scene.add(this.light);
+  }
 
   spawn(x: number, z: number, color: number, dirX: number, dirZ: number) {
     // Flash: a quick hot sphere and a light, gone in a quarter second.
     const flash = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
     flash.position.set(x, 1.0, z);
-    const light = new THREE.PointLight(0xffa860, 60, 9, 2);
-    light.position.set(x, 1.2, z);
-    this.scene.add(flash, light);
-    this.flashes.push({ mesh: flash, light, life: 0.25, max: 0.25 });
+    this.light.position.set(x, 1.2, z);
+    this.light.intensity = 60;
+    this.scene.add(flash);
+    this.flashes.push({ mesh: flash, life: 0.25, max: 0.25 });
 
     // Chunks: charred shell pieces plus a couple in the player color, thrown mostly along the shot.
     const charred = new THREE.MeshStandardMaterial({ color: 0x2a2a2c, roughness: 0.9, metalness: 0.1 });
@@ -72,7 +78,8 @@ export class DeathFx {
   clear() {
     for (const c of this.chunks) this.scene.remove(c.mesh);
     for (const p of this.puffs) { this.scene.remove(p.sprite); p.sprite.material.dispose(); }
-    for (const f of this.flashes) this.scene.remove(f.mesh, f.light);
+    for (const f of this.flashes) this.scene.remove(f.mesh);
+    this.light.intensity = 0;
     for (const s of this.scorches) this.scene.remove(s.mesh);
     this.chunks = []; this.puffs = []; this.flashes = []; this.scorches = [];
   }
@@ -83,8 +90,8 @@ export class DeathFx {
       const t = Math.max(0, f.life / f.max);
       f.mesh.scale.setScalar(1 + (1 - t) * 1.6);
       (f.mesh.material as THREE.MeshBasicMaterial).opacity = 0.7 * t * t;
-      f.light.intensity = 60 * t;
-      if (f.life <= 0) { this.scene.remove(f.mesh, f.light); return false; }
+      this.light.intensity = 60 * t;
+      if (f.life <= 0) { this.scene.remove(f.mesh); return false; }
       return true;
     });
     this.chunks = this.chunks.filter((c) => {

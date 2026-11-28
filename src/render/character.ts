@@ -43,7 +43,7 @@ export class Character {
   private gun = new THREE.Group();
   private legs: Leg[] = [];
   private arms: Arm[] = [];
-  private glint: THREE.Sprite;
+  readonly glint: THREE.Sprite;
 
   flash = 0; // seconds of white hit flash left
   recoil = 0; // 0..1 (empowered shots kick to >1)
