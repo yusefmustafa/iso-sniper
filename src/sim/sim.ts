@@ -2,7 +2,7 @@ import { config as defaultConfig, type Config } from '../config';
 import { defaultArena, rayToCircle, rayToWorld, resolveCircle } from './arena';
 import { datan2, dcos, dhypot, dsin } from './dmath';
 import { nextRandom } from './rng';
-import { emptyStats, type Command, type GameState, type PlayerState } from './types';
+import { emptyStats, MAX_PLAYERS, type Command, type GameState, type PlayerState } from './types';
 
 /**
  * The game rules. step() is a pure function of (state, commands, config):
@@ -15,8 +15,17 @@ export const MUZZLE_OFFSET = 0.6; // muzzle distance in front of the body center
 
 export const secToTicks = (s: number, cfg: Config = defaultConfig) => Math.round(s * cfg.tickRate);
 
+/**
+ * Which spawn a player uses this round. In a free-for-all the spawns rotate
+ * every round so nobody keeps the best corner; a duel keeps its two sides.
+ */
+export const spawnIndex = (id: number, state: Pick<GameState, 'arena' | 'round'>) => {
+  const n = state.arena.spawns.length; // one spawn per player
+  return n > 2 ? (id + state.round - 1) % n : id;
+};
+
 function newPlayer(id: number, state: GameState, dummy: boolean, cfg: Config): PlayerState {
-  const s = state.arena.spawns[id];
+  const s = state.arena.spawns[spawnIndex(id, state)];
   return {
     id, x: s.x, z: s.z, vx: 0, vz: 0, aim: s.aim, hp: cfg.maxHp,
     stance: 'normal', ads: false, adsTicks: 0, boltTicks: 0, gunRaiseTicks: 0,
@@ -26,17 +35,22 @@ function newPlayer(id: number, state: GameState, dummy: boolean, cfg: Config): P
   };
 }
 
-export function createGame(opts: { seed?: number; dummyP2?: boolean } = {}, cfg: Config = defaultConfig): GameState {
+/**
+ * A new match. `players` is 2 (a duel) to 4 (free-for-all). `dummyP2` makes
+ * every player but the first a practice dummy.
+ */
+export function createGame(opts: { seed?: number; dummyP2?: boolean; players?: number } = {}, cfg: Config = defaultConfig): GameState {
+  const n = Math.max(2, Math.min(MAX_PLAYERS, opts.players ?? 2));
   const state: GameState = {
     tick: 0, seed: opts.seed ?? 12345, phase: 'countdown', phaseTicks: secToTicks(cfg.countdownTime, cfg),
-    round: 1, score: [0, 0], hitstop: 0, slowmoTicks: 0, players: [], stats: emptyStats(), arena: defaultArena(), events: [],
+    round: 1, score: Array(n).fill(0), hitstop: 0, slowmoTicks: 0, players: [], stats: emptyStats(n), arena: defaultArena(n), events: [],
   };
-  state.players = [newPlayer(0, state, false, cfg), newPlayer(1, state, !!opts.dummyP2, cfg)];
+  for (let i = 0; i < n; i++) state.players.push(newPlayer(i, state, i > 0 && !!opts.dummyP2, cfg));
   state.events.push({ type: 'roundStart', round: 1 });
   return state;
 }
 
-function resetRound(state: GameState, cfg: Config) {
+export function resetRound(state: GameState, cfg: Config = defaultConfig) {
   state.players = state.players.map((p) => newPlayer(p.id, state, p.dummy, cfg));
   state.phase = 'countdown';
   state.phaseTicks = secToTicks(cfg.countdownTime, cfg);
@@ -116,7 +130,11 @@ export function step(state: GameState, commands: Command[], cfg: Config = defaul
   }
 
   // The practice dummy normally gets empty commands; the dev toggle can make it shoot.
-  state.players.forEach((p, i) => updatePlayer(state, p, commands[i], cfg));
+  // Players who are out this round (free-for-all) do nothing until the next one.
+  for (const p of state.players) {
+    if (state.phase !== 'playing') break; // the round was just won
+    if (p.hp > 0) updatePlayer(state, p, commands[p.id], cfg);
+  }
   separatePlayers(state, cfg);
 }
 
@@ -291,17 +309,21 @@ function integrate(state: GameState, p: PlayerState, cfg: Config, frictionOnly: 
 }
 
 function separatePlayers(state: GameState, cfg: Config) {
-  const [a, b] = state.players;
-  const ra = hitRadius(a, cfg), rb = hitRadius(b, cfg);
-  const dx = b.x - a.x, dz = b.z - a.z;
-  const d = dhypot(dx, dz);
-  const min = ra + rb;
-  if (d >= min || d < 1e-6) return;
-  const push = (min - d) / 2;
-  a.x -= (dx / d) * push; a.z -= (dz / d) * push;
-  b.x += (dx / d) * push; b.z += (dz / d) * push;
-  resolveCircle(state.arena, a, ra);
-  resolveCircle(state.arena, b, rb);
+  const ps = state.players;
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j];
+    if (a.hp <= 0 || b.hp <= 0) continue;
+    const ra = hitRadius(a, cfg), rb = hitRadius(b, cfg);
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const d = dhypot(dx, dz);
+    const min = ra + rb;
+    if (d >= min || d < 1e-6) continue;
+    const push = (min - d) / 2;
+    a.x -= (dx / d) * push; a.z -= (dz / d) * push;
+    b.x += (dx / d) * push; b.z += (dz / d) * push;
+    resolveCircle(state.arena, a, ra);
+    resolveCircle(state.arena, b, rb);
+  }
 }
 
 function fire(state: GameState, p: PlayerState, cfg: Config) {
@@ -363,13 +385,19 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
     state.events.push({ type: 'hit', player: o.id, by: p.id, damage, dirX: dx, dirZ: dz });
 
     if (o.hp === 0) {
-      state.score[p.id]++;
+      // Last one standing wins the round. In a duel that is the first kill.
+      state.stats.kills[p.id]++;
+      const standing = state.players.filter((q) => q.hp > 0);
+      state.events.push({ type: 'eliminated', player: o.id, by: p.id, left: standing.length });
+      if (standing.length > 1) return;
+      const winner = standing[0]?.id ?? p.id;
+      state.score[winner]++;
       // finalShotSlowmoTime is game time; in real time it lasts 1/finalShotSlowmo longer.
       state.slowmoTicks = secToTicks(cfg.finalShotSlowmoTime / cfg.finalShotSlowmo, cfg);
-      state.events.push({ type: 'roundWon', player: p.id, score: [...state.score] });
-      if (state.score[p.id] >= cfg.roundsToWin) {
+      state.events.push({ type: 'roundWon', player: winner, score: [...state.score] });
+      if (state.score[winner] >= cfg.roundsToWin) {
         state.phase = 'matchEnd';
-        state.events.push({ type: 'matchWon', player: p.id });
+        state.events.push({ type: 'matchWon', player: winner });
       } else {
         state.phase = 'roundEnd';
         state.phaseTicks = secToTicks(cfg.roundEndTime, cfg);
@@ -380,8 +408,8 @@ function fire(state: GameState, p: PlayerState, cfg: Config) {
 
 /** Start a fresh match keeping the same players (and dummy setting). */
 export function restartMatch(state: GameState, cfg: Config = defaultConfig): void {
-  state.score = [0, 0];
-  state.stats = emptyStats();
+  state.score = state.players.map(() => 0);
+  state.stats = emptyStats(state.players.length);
   state.round = 1;
   state.hitstop = 0;
   state.slowmoTicks = 0;

@@ -52,6 +52,8 @@ export class BotBrain {
   private lastPos = { x: 0, z: 0 };
   private stuckT = 0;
   private detour = 0; // seconds left walking sideways around cover
+  private target = -1; // player slot it is fighting
+  private retarget = 0; // seconds until it reconsiders the target
 
   constructor(level: BotLevel = 'normal') {
     this.skill = SKILLS[level];
@@ -60,14 +62,16 @@ export class BotBrain {
   think(state: GameState, me: number, cfg: Config = defaultConfig): Command {
     const dt = 1 / cfg.tickRate;
     const c = emptyCommand();
-    const p = state.players[me], o = state.players[1 - me];
+    const p = state.players[me];
+    const o = this.pickTarget(state, p, dt);
+    c.aimActive = true;
+    if (!o || p.hp <= 0) { c.aim = this.aim; this.reset(); return c; }
     const dx = o.x - p.x, dz = o.z - p.z;
     const dist = Math.hypot(dx, dz);
     const toward = Math.atan2(dz, dx);
     const visible = this.lineOfSight(state, p, o);
     this.seenFor = visible ? this.seenFor + dt : 0;
 
-    c.aimActive = true;
     if (state.phase === 'matchEnd') {
       // The human calls the rematch (Enter or Start), so they get to read the results first.
       c.aim = this.aim;
@@ -126,9 +130,12 @@ export class BotBrain {
     const loaded = p.boltTicks === 0;
     const canShoot = visible && loaded && this.seenFor >= this.skill.reaction && o.hp > 0 && !p.adsLock;
 
-    // Dodge: the opponent is focusing at us. Roll across their laser now and then.
-    const theirErr = Math.abs(wrap(o.aim - Math.atan2(-dz, -dx)));
-    const threatened = o.ads && theirErr < 0.12 && visible && o.boltTicks === 0;
+    // Dodge: someone is focusing at us. Roll across their laser now and then.
+    const threatened = state.players.some((q) => {
+      if (q.id === me || q.hp <= 0 || !q.ads || q.boltTicks > 0) return false;
+      const err = Math.abs(wrap(q.aim - Math.atan2(p.z - q.z, p.x - q.x)));
+      return err < 0.12 && (q === o ? visible : this.lineOfSight(state, q, p));
+    });
     if (this.plan !== 'empower' && threatened && p.rollCooldownTicks === 0 && p.stance !== 'roll' && this.rollTicks === 0
       && Math.random() < this.skill.dodge * dt) {
       this.startRoll(-uz * this.strafe, ux * this.strafe, 2);
@@ -195,6 +202,30 @@ export class BotBrain {
       if (p.stance === 'kneel') c.roll = true;
     }
     return c;
+  }
+
+  /**
+   * Who to fight. In a duel, the other player. In a free-for-all it sticks with
+   * its target while it can see them, and otherwise switches to the nearest
+   * player it can see (or the nearest one at all).
+   */
+  private pickTarget(state: GameState, p: PlayerState, dt: number): PlayerState | null {
+    const others = state.players.filter((q) => q.id !== p.id && q.hp > 0);
+    if (others.length <= 1) { this.target = others[0]?.id ?? -1; return others[0] ?? null; }
+    this.retarget -= dt;
+    const cur = state.players[this.target];
+    const keep = cur && cur.id !== p.id && cur.hp > 0 && this.retarget > 0;
+    if (keep) return cur;
+    this.retarget = rand(0.4, 0.8);
+    const d = (q: PlayerState) => Math.hypot(q.x - p.x, q.z - p.z);
+    const seen = others.filter((q) => this.lineOfSight(state, p, q));
+    const pool = seen.length ? seen : others;
+    let best = pool.reduce((a, b) => (d(b) < d(a) ? b : a));
+    // Don't flip between two similar targets: keep the current one unless the new one is clearly closer.
+    if (cur && cur.hp > 0 && cur.id !== p.id && pool.includes(cur) && d(best) > d(cur) * 0.7) best = cur;
+    if (best.id !== this.target) this.seenFor = 0;
+    this.target = best.id;
+    return best;
   }
 
   private startRoll(x: number, z: number, holdTicks: number) {

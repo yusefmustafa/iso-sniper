@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { config } from '../config';
 import { rayToCircle, rayToWorld } from '../sim/arena';
-import { chargeProgress, hitRadius, isCharged, secToTicks } from '../sim/sim';
-import type { GameState, PlayerState, SimEvent } from '../sim/types';
+import { chargeProgress, hitRadius, isCharged, secToTicks, spawnIndex } from '../sim/sim';
+import { MAX_PLAYERS, type GameState, type PlayerState, type SimEvent } from '../sim/types';
 import { Character, makeGlintTexture, SHOULDER_HEIGHT } from './character';
 import { DeathFx } from './death';
 
@@ -11,7 +11,8 @@ import { DeathFx } from './death';
  * simulation, so it can be swapped or run at any frame rate.
  */
 
-export const PLAYER_COLORS = [0xff8a3d, 0x3dd6ff];
+/** Orange, blue, green, pink. None is red (the laser) or white (the empowered shot). */
+export const PLAYER_COLORS = [0xff8a3d, 0x3dd6ff, 0x7ee05a, 0xff6fd8];
 export const AIM_HEIGHT = SHOULDER_HEIGHT; // rifle height: lasers, tracers and the mouse aim plane
 const CAM_OFFSET = new THREE.Vector3(20, 24, 20);
 
@@ -52,6 +53,8 @@ export class GameRenderer {
   /** Interpolated player positions from the last render, for overlays. */
   positions: { x: number; z: number }[] = [];
   private arenaBuilt = false;
+  private pads: THREE.Mesh[] = [];
+  private padsKey = '';
   private warmed = false;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -155,12 +158,26 @@ export class GameRenderer {
     addBlock(-hw - t / 2, 0, t, arena.depth, wh, wallMat);
     addBlock(hw + t / 2, 0, t, arena.depth, wh, wallMat);
 
-    // Spawn pads in player colors
-    arena.spawns.forEach((s, i) => {
-      const pad = new THREE.Mesh(new THREE.CircleGeometry(1.2, 32), new THREE.MeshBasicMaterial({ color: PLAYER_COLORS[i], transparent: true, opacity: 0.12 }));
-      pad.rotation.x = -Math.PI / 2;
-      pad.position.set(s.x, 0.01, s.z);
-      this.scene.add(pad);
+  }
+
+  /** Spawn pads, tinted with the color of whoever starts there this round. Rebuilt when the spawns change (duel or free-for-all). */
+  private updatePads(state: GameState) {
+    const spawns = state.arena.spawns;
+    const key = JSON.stringify(spawns);
+    if (key !== this.padsKey) {
+      this.padsKey = key;
+      for (const p of this.pads) { this.scene.remove(p); p.geometry.dispose(); (p.material as THREE.Material).dispose(); }
+      this.pads = spawns.map((s) => {
+        const pad = new THREE.Mesh(new THREE.CircleGeometry(1.2, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12 }));
+        pad.rotation.x = -Math.PI / 2;
+        pad.position.set(s.x, 0.01, s.z);
+        this.scene.add(pad);
+        return pad;
+      });
+    }
+    state.players.forEach((p) => {
+      const pad = this.pads[spawnIndex(p.id, state)];
+      if (pad) (pad.material as THREE.MeshBasicMaterial).color.setHex(PLAYER_COLORS[p.id]);
     });
   }
 
@@ -281,8 +298,14 @@ export class GameRenderer {
    */
   render(state: GameState, prev: { x: number; z: number }[], alpha: number, dt: number, frozen: boolean) {
     if (!this.arenaBuilt) { this.buildArena(state); this.arenaBuilt = true; }
-    while (this.views.length < state.players.length) this.views.push(this.buildPlayer(this.views.length));
-    if (!this.warmed && this.views.length >= 2) { this.prewarm(); this.warmed = true; }
+    this.updatePads(state);
+    // All four players are built up front (and their shaders prewarmed); the ones not in this match are hidden.
+    while (this.views.length < MAX_PLAYERS) this.views.push(this.buildPlayer(this.views.length));
+    if (!this.warmed) { this.prewarm(); this.warmed = true; }
+    for (let i = state.players.length; i < this.views.length; i++) {
+      const v = this.views[i];
+      v.char.root.visible = v.laserOuter.visible = v.laserCore.visible = false;
+    }
     this.time += dt;
 
     const positions = this.positions = state.players.map((p, i) => ({
@@ -315,7 +338,7 @@ export class GameRenderer {
       const ox = pos.x + fwdX * MUZZLE_REACH - fwdZ * MUZZLE_SIDE, oz = pos.z + fwdZ * MUZZLE_REACH + fwdX * MUZZLE_SIDE;
       let dist = rayToWorld(state.arena, ox, oz, fwdX, fwdZ, config.shotRange);
       for (const o of state.players) {
-        if (o.id === p.id) continue;
+        if (o.id === p.id || o.hp <= 0) continue;
         dist = Math.min(dist, rayToCircle(ox, oz, fwdX, fwdZ, o.x, o.z, hitRadius(o)));
       }
       const charged = isCharged(p);
@@ -348,7 +371,10 @@ export class GameRenderer {
   private updateCamera(state: GameState, pos: { x: number; z: number }[], dt: number) {
     // Frame both players, leaning a little toward where each one aims.
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    state.players.forEach((p, i) => {
+    // Players knocked out of a free-for-all round drop out of the shot.
+    const inShot = state.players.some((p) => p.hp > 0) ? state.players.filter((p) => p.hp > 0) : state.players;
+    pos = inShot.map((p) => pos[p.id]);
+    inShot.forEach((p, i) => {
       const lead = p.ads ? 2.5 : 1.2;
       for (const q of [pos[i], { x: pos[i].x + Math.cos(p.aim) * lead, z: pos[i].z + Math.sin(p.aim) * lead }]) {
         minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
@@ -379,7 +405,9 @@ export class GameRenderer {
       sw = Math.max(sw, Math.abs(dx * right.x + dz * right.y));
       sh = Math.max(sh, Math.abs(dx * up.x + dz * up.y) * 0.78); // ground foreshortening at this camera pitch
     }
-    const want = Math.max(13, Math.min(30, Math.max(sh + 7, (sw + 9) / aspect)));
+    // A free-for-all can spread across the whole arena, so it may zoom out further than a duel.
+    const maxZoom = state.players.length > 2 ? 36 : 30;
+    const want = Math.max(13, Math.min(maxZoom, Math.max(sh + 7, (sw + 9) / aspect)));
     [this.zoom, this.zoomVel] = spring(this.zoom, this.zoomVel, want);
     this.applyZoom();
 

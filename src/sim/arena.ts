@@ -1,7 +1,19 @@
+import { datan2 } from './dmath';
 import type { Arena, Box } from './types';
 
+/**
+ * Spawn points for a match of `players`. A duel starts on the left and right
+ * edges; three or four players start in the corners, the first two diagonally
+ * opposite, every one facing the middle.
+ */
+export function spawnsFor(players: number): Arena['spawns'] {
+  if (players <= 2) return [{ x: -16, z: 0, aim: 0 }, { x: 16, z: 0, aim: Math.PI }];
+  const corners = [[-16, -9], [16, 9], [16, -9], [-16, 9]];
+  return corners.slice(0, players).map(([x, z]) => ({ x, z, aim: datan2(-z, -x) }));
+}
+
 /** A 40 x 25 m arena, symmetric under a 180 degree rotation so neither spawn is favored. */
-export function defaultArena(): Arena {
+export function defaultArena(players = 2): Arena {
   const h = 1.4;
   const boxes: Box[] = [
     { x: 0, z: 0, w: 2.5, d: 2.5, h },
@@ -18,10 +30,7 @@ export function defaultArena(): Arena {
     width: 40,
     depth: 25,
     boxes,
-    spawns: [
-      { x: -16, z: 0, aim: 0 },
-      { x: 16, z: 0, aim: Math.PI },
-    ],
+    spawns: spawnsFor(players),
   };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { config } from '../src/config';
-import { createGame, secToTicks, step } from '../src/sim/sim';
+import { createGame, resetRound as restartRoundForTest, secToTicks, step } from '../src/sim/sim';
 import { emptyCommand, type Command, type GameState } from '../src/sim/types';
 
 const T = (s: number) => secToTicks(s);
@@ -233,5 +233,25 @@ describe('determinism', () => {
     run(a, 600, script, script);
     run(b, 600, script, script);
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+});
+
+describe('free-for-all setup', () => {
+  it('four players start in four different corners, and the corners rotate each round', () => {
+    const g = createGame({ players: 4 });
+    const at = () => g.players.map((p) => `${p.x},${p.z}`);
+    expect(new Set(at()).size).toBe(4);
+    const first = at();
+    g.round = 2;
+    restartRoundForTest(g);
+    expect(new Set(at()).size).toBe(4);
+    expect(at()).not.toEqual(first);
+    expect(at()[0]).toBe(first[1]);
+  });
+
+  it('a duel keeps its two sides every round', () => {
+    const g = createGame();
+    expect(g.players.map((p) => p.x)).toEqual([-16, 16]);
+    expect(g.score).toEqual([0, 0]);
   });
 });
