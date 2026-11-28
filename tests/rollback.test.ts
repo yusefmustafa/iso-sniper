@@ -285,4 +285,25 @@ describe('four players', () => {
     drain(alive, net, new Set());
     expect(agree(alive)).toBeGreaterThan(3);
   });
+
+  it('players whose browsers take a few seconds to load the match are not dropped', () => {
+    const { net, sessions } = mesh(4, { latencyMs: 60, jitterMs: 10, random: lcg(8) }, { dropLaggers: true });
+    run(sessions, net, 120, new Set([2, 3])); // 2 s: slots 2 and 3 are still loading
+    run(sessions, net, 120, new Set([3])); // 4 s: slot 3 is still loading
+    run(sessions, net, 600);
+    for (const s of sessions) expect(s.drops).toEqual([]);
+    drain(sessions, net);
+    expect(agree(sessions)).toBeGreaterThan(3);
+  });
+
+  it('only the player who froze is dropped, not the ones waiting on them', () => {
+    const { net, sessions } = mesh(4, { latencyMs: 50, jitterMs: 10, random: lcg(9) }, { dropLaggers: true });
+    run(sessions, net, 600);
+    run(sessions, net, 20, new Set([1])); // slot 1 hitches for a third of a second
+    run(sessions, net, 600, new Set([3])); // slot 3's browser hangs
+    const alive = sessions.slice(0, 3);
+    for (const s of alive) expect(s.drops.map(([slot]) => slot)).toEqual([3]);
+    drain(alive, net, new Set());
+    expect(agree(alive)).toBeGreaterThan(3);
+  });
 });

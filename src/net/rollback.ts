@@ -47,6 +47,8 @@ export interface RollbackOptions {
   dropAfterStall?: number;
   /** Seconds without a packet before a player is dropped. */
   dropAfterSilence?: number;
+  /** Seconds at the start of a match when nobody is dropped for being slow (browsers are still loading). */
+  dropGrace?: number;
   clock?: () => number; // ms; injectable for tests
 }
 
@@ -133,6 +135,7 @@ export class RollbackSession {
   private skipCooldown = 0;
   private rollbackTimes: number[] = [];
   private stallScore: number[]; // host: recent ticks someone waited on each slot
+  private readonly startedAt: number;
   private opts: RollbackOptions;
   private clock: () => number;
   private unsubscribe: () => void;
@@ -169,6 +172,7 @@ export class RollbackSession {
     this.lastStamped = Array(this.n).fill(this.inputDelay - 1);
     this.stampedTo = this.inputDelay - 1;
     const now = this.clock();
+    this.startedAt = now;
     for (const id of new Set(this.owners)) {
       if (id === this.self) continue;
       this.peers.set(id, {
@@ -467,8 +471,12 @@ export class RollbackSession {
   /**
    * Host: drop a player who went silent, or whose inputs have kept someone
    * waiting for `dropAfterStall` seconds within the last few seconds.
+   * Only the player furthest behind is blamed: the others are often just
+   * waiting on them too. Nobody is dropped while the match is still loading.
    */
   private checkLaggers(now: number) {
+    const grace = (this.opts.dropGrace ?? 10) * 1000;
+    if (now - this.startedAt < grace) return;
     const silence = (this.opts.dropAfterSilence ?? 2.5) * 1000;
     const limit = (this.opts.dropAfterStall ?? 2.5) * this.cfg.tickRate;
     const slowBy = Array(this.n).fill(0);
@@ -478,16 +486,21 @@ export class RollbackSession {
       slowBy[s] = this.frame - this.confirmed[s];
     }
     for (const p of this.livePeers()) {
+      if (now - p.heardAt > 500) continue; // a frozen peer's last report is stale: don't let it blame others
       for (let s = 0; s < this.n; s++) {
         const owner = this.ownerAt(s, p.frame);
         if (owner === p.id || owner === this.self) continue;
         slowBy[s] = Math.max(slowBy[s], p.frame - p.ack[s]);
       }
     }
+    const playing = (s: number) => this.owners[s] !== this.self && this.dropAt[s] === Infinity;
+    let worst = 0;
+    for (let s = 0; s < this.n; s++) if (playing(s)) worst = Math.max(worst, slowBy[s]);
     for (let s = 0; s < this.n; s++) {
       const owner = this.owners[s];
-      if (owner === this.self || this.dropAt[s] !== Infinity) { this.stallScore[s] = 0; continue; }
-      this.stallScore[s] = slowBy[s] > this.maxPrediction ? this.stallScore[s] + 1 : Math.max(0, this.stallScore[s] - 0.25);
+      if (!playing(s)) { this.stallScore[s] = 0; continue; }
+      const toBlame = slowBy[s] > this.maxPrediction && slowBy[s] > worst - this.maxPrediction;
+      this.stallScore[s] = toBlame ? this.stallScore[s] + 1 : Math.max(0, this.stallScore[s] - 0.25);
       const peer = this.peers.get(owner);
       if (this.stallScore[s] > limit || (peer && now - peer.heardAt > silence)) this.dropPeer(owner);
     }
