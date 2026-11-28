@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "relay": "node tools/nostr-relay.cjs",
-    "smoke:online": "node tools/online-smoke.cjs"
+    "smoke:online": "node tools/online-smoke.cjs",
+    "bot": "node tools/bot.cjs"
   },
   "dependencies": {
     "lil-gui": "^0.20.0",

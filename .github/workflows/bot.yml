@@ -1,0 +1,45 @@
+name: Summon a bot
+
+# Sends a bot into an online match from GitHub's servers, so you can test the real
+# netcode (different network, real ping) without a second player.
+# Actions tab -> "Summon a bot" -> Run workflow -> paste your match link.
+
+on:
+  workflow_dispatch:
+    inputs:
+      link:
+        description: 'Match link (create a match on snipefight.com and copy its link)'
+        required: true
+      level:
+        description: 'Bot difficulty'
+        type: choice
+        options: [easy, normal, hard]
+        default: normal
+      minutes:
+        description: 'How long the bot stays (max 60)'
+        default: '30'
+
+permissions:
+  contents: read
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install a headless browser
+        run: |
+          npm install --no-save --no-package-lock playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Play
+        env:
+          LINK: ${{ inputs.link }}
+          LEVEL: ${{ inputs.level }}
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          m=$(( MINUTES > 60 ? 60 : MINUTES ))
+          node tools/bot.cjs "$LINK" --level "$LEVEL" --minutes "$m"
