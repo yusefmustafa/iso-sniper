@@ -24,11 +24,12 @@ permissions:
 jobs:
   play:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[stress]')
+    # Pinned Linux images: ubuntu-latest (26.04) has no Playwright 1.55 browser build.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { slot: 0, os: ubuntu-latest, name: 'Linux Host', host: '4', level: hard }
+          - { slot: 0, os: ubuntu-24.04, name: 'Linux Host', host: '4', level: hard }
           - { slot: 1, os: windows-latest, name: 'Windows Bot', host: '0', level: normal }
           - { slot: 2, os: macos-latest, name: 'Mac Bot', host: '0', level: hard }
           - { slot: 3, os: ubuntu-22.04, name: 'Linux Bot', host: '0', level: normal }
