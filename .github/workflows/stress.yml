@@ -1,0 +1,93 @@
+name: FFA stress test
+
+# Four bots on four separate GitHub machines (Linux, Windows, macOS) play a
+# 4-player free-for-all against each other over the real internet: WebRTC,
+# public Nostr signaling, real pings. Each records what it sees. The report
+# job checks that all four computed the same game, summarizes the rollbacks,
+# waits and pings, and makes a side-by-side video.
+#
+# Run it from the Actions tab, or push a commit whose message contains [stress].
+# Results: the run's summary page, and the "videos" artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'Minutes of play'
+        default: '5'
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+
+jobs:
+  play:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[stress]')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { slot: 0, os: ubuntu-latest, name: 'Linux Host', host: '4', level: hard }
+          - { slot: 1, os: windows-latest, name: 'Windows Bot', host: '0', level: normal }
+          - { slot: 2, os: macos-latest, name: 'Mac Bot', host: '0', level: hard }
+          - { slot: 3, os: ubuntu-22.04, name: 'Linux Bot', host: '0', level: normal }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install a headless browser
+        run: |
+          npm install --no-save --no-package-lock playwright@1.55.0
+          if [ "$RUNNER_OS" = "Linux" ]; then npx playwright install --with-deps chromium; else npx playwright install chromium; fi
+      - run: npm run build
+      - name: Serve the build
+        run: |
+          npx vite preview --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://localhost:4173/ > /dev/null && exit 0; sleep 1; done
+          cat preview.log; exit 1
+      - name: Play
+        env:
+          ROOM: ffa${{ github.run_id }}x${{ github.run_attempt }}
+          MINUTES: ${{ inputs.minutes || '5' }}
+        run: |
+          m=$(( MINUTES > 15 ? 15 : MINUTES ))
+          node tools/stress.cjs --room "$ROOM" --host "${{ matrix.host }}" --name "${{ matrix.name }}" --level "${{ matrix.level }}" --minutes "$m" --wait 420 --out stress-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: player-${{ matrix.slot }}
+          path: stress-out/
+          retention-days: 14
+
+  report:
+    needs: play
+    if: always() && needs.play.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: player-*
+          path: results
+      - name: Summary
+        run: node tools/stress-report.cjs results | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Videos
+        if: always()
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          node tools/stress-video.cjs results videos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: videos
+          path: videos/
+          retention-days: 14

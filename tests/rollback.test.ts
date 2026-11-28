@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { config } from '../src/config';
-import { loopbackPair } from '../src/net/channel';
 import { decodeCommand, encodeCommand } from '../src/net/codec';
-import { RollbackSession } from '../src/net/rollback';
+import { loopbackMesh, type LinkOpts } from '../src/net/mesh';
+import { RollbackSession, type RollbackOptions } from '../src/net/rollback';
 import { datan2, dcos, dsin } from '../src/sim/dmath';
 import { createGame, step } from '../src/sim/sim';
 import { emptyCommand, type Command, type GameState } from '../src/sim/types';
@@ -11,7 +11,7 @@ import { emptyCommand, type Command, type GameState } from '../src/sim/types';
 function scripted(p: number, f: number, s: GameState): Command {
   const c = emptyCommand();
   const phase = Math.floor(f / 23) + p * 7;
-  const me = s.players[p], other = s.players[1 - p];
+  const me = s.players[p], other = s.players[(p + 1) % s.players.length];
   c.moveX = [1, 0, -1, 0.5, 0][phase % 5];
   c.moveZ = [0, 1, 0.3, -1, 0][(phase * 3) % 5];
   c.aimActive = true;
@@ -24,20 +24,24 @@ function scripted(p: number, f: number, s: GameState): Command {
   return c;
 }
 
+const lcg = (seed: number) => { let r = seed; return () => ((r = (r * 16807) % 2147483647) / 2147483647); };
+
+/** `n` peers in a full mesh, one player each; peer 0 hosts. */
+export function mesh(n: number, link: LinkOpts & { random?: () => number }, opts: RollbackOptions = {}, game: () => GameState = () => createGame({ seed: 7, players: n })) {
+  const net = loopbackMesh(n, link);
+  const clock = () => net.now;
+  const sessions = net.meshes.map((m, i) => new RollbackSession(game(), { self: m.selfId, host: net.ids[0], owners: net.ids, local: i }, m, config, { clock, ...opts }));
+  return { net, sessions };
+}
+
 function runNetworked(opts: { latencyMs: number; jitterMs?: number; loss?: number; frames: number; seed?: number }) {
-  let r = 1;
-  const random = () => ((r = (r * 16807) % 2147483647) / 2147483647);
-  const link = loopbackPair({ ...opts, random });
-  const clock = () => link.now;
-  const a = new RollbackSession(createGame({ seed: opts.seed ?? 7 }), 0, link.a, config, { clock });
-  const b = new RollbackSession(createGame({ seed: opts.seed ?? 7 }), 1, link.b, config, { clock });
+  const { net: link, sessions: [a, b] } = mesh(2, { ...opts, random: lcg(1) }, {}, () => createGame({ seed: opts.seed ?? 7 }));
   const frameMs = 1000 / 60;
   for (let i = 0; i < opts.frames; i++) {
     a.tick(scripted(0, a.frame, a.state));
     b.tick(scripted(1, b.frame, b.state));
     link.advance(frameMs);
   }
-  // Let the last inputs arrive, then stop feeding new frames until both have caught up.
   return { a, b, link };
 }
 
@@ -91,10 +95,7 @@ describe('rollback session', () => {
 
   it('the shooter sees their own shot instantly, and the hit is the same on both peers', () => {
     // A stands still and fires an aimed shot at B, who is also standing still.
-    const link = loopbackPair({ latencyMs: 60 });
-    const clock = () => link.now;
-    const mk = (id: number) => { const g = createGame({ seed: 1 }); g.arena.boxes = []; return new RollbackSession(g, id, id ? link.b : link.a, config, { clock, maxInputDelay: 2 }); };
-    const a = mk(0), b = mk(1);
+    const { net: link, sessions: [a, b] } = mesh(2, { latencyMs: 60 }, { maxInputDelay: 2, maxSelfDelay: 2 }, () => { const g = createGame({ seed: 1 }); g.arena.boxes = []; return g; });
     const countdown = config.countdownTime * 60 + 5;
     const aim = (s: GameState) => Math.atan2(s.players[1].z - s.players[0].z, s.players[1].x - s.players[0].x);
     let shotFrameA = -1;
@@ -123,10 +124,7 @@ describe('input delay and presses', () => {
   });
 
   it('keeps the delay change in sync when the ping drops mid-match', () => {
-    const link = loopbackPair({ latencyMs: 120 });
-    const clock = () => link.now;
-    const a = new RollbackSession(createGame({ seed: 5 }), 0, link.a, config, { clock, maxInputDelay: 4 });
-    const b = new RollbackSession(createGame({ seed: 5 }), 1, link.b, config, { clock, maxInputDelay: 4 });
+    const { net: link, sessions: [a, b] } = mesh(2, { latencyMs: 120 }, { maxInputDelay: 4, maxSelfDelay: 4 }, () => createGame({ seed: 5 }));
     for (let i = 0; i < 1500; i++) {
       if (i === 700) link.setLatency(10);
       a.tick(scripted(0, a.frame, a.state));
@@ -144,8 +142,9 @@ describe('input delay and presses', () => {
 
   it('a click on a tick that waits for the opponent is not lost', () => {
     // B never sends anything, so A runs out of prediction and waits.
-    const link = loopbackPair({ latencyMs: 30 });
-    const a = new RollbackSession(createGame({ seed: 1 }), 0, link.a, config, { clock: () => link.now });
+    const link = loopbackMesh(2, { latencyMs: 30 });
+    const setup = (i: number) => ({ self: link.ids[i], host: link.ids[0], owners: link.ids, local: i });
+    const a = new RollbackSession(createGame({ seed: 1 }), setup(0), link.meshes[0], config, { clock: () => link.now });
     for (let i = 0; i < 40; i++) { a.tick(emptyCommand()); link.advance(1000 / 60); }
     expect(a.stats.stalled).toBe(true);
     const frame = a.frame;
@@ -154,17 +153,14 @@ describe('input delay and presses', () => {
     expect(a.frame).toBe(frame);
     // The opponent catches up; the click goes out with A's next frame.
     const sent: number[][] = [];
-    link.b.onMessage((m) => { if (m.t === 'in') m.c.forEach((w) => sent.push(w)); });
-    const b = new RollbackSession(createGame({ seed: 1 }), 1, link.b, config, { clock: () => link.now });
+    link.meshes[1].onMessage((_, m) => { if (m.t === 'in') m.c.forEach(([, , ws]) => ws.forEach((w) => sent.push(w))); });
+    const b = new RollbackSession(createGame({ seed: 1 }), setup(1), link.meshes[1], config, { clock: () => link.now });
     for (let i = 0; i < 20; i++) { a.tick(emptyCommand()); b.tick(emptyCommand()); link.advance(1000 / 60); }
     expect(sent.some((w) => (w[3] & 8) !== 0)).toBe(true);
   });
 
   it('an empowered shot over a laggy link hits on both machines with no long wait', () => {
-    const link = loopbackPair({ latencyMs: 90, jitterMs: 25, loss: 0.05, random: (() => { let r = 3; return () => ((r = (r * 16807) % 2147483647) / 2147483647); })() });
-    const clock = () => link.now;
-    const mk = (id: number) => { const g = createGame({ seed: 3 }); g.players[0].x = 6; g.players[0].z = 0; return new RollbackSession(g, id, id ? link.b : link.a, config, { clock }); };
-    const a = mk(0), b = mk(1);
+    const { net: link, sessions: [a, b] } = mesh(2, { latencyMs: 90, jitterMs: 25, loss: 0.05, random: lcg(3) }, {}, () => { const g = createGame({ seed: 3 }); g.players[0].x = 6; g.players[0].z = 0; return g; });
     let start = -1, longestWait = 0, wait = 0, hits = 0;
     for (let i = 0; i < 900; i++) {
       const s = b.state, me = s.players[1], o = s.players[0];
@@ -214,5 +210,79 @@ describe('match stats', () => {
     g.phase = 'matchEnd';
     step(g, [{ ...emptyCommand(), start: true }, emptyCommand()]);
     expect(g.stats.shots).toEqual([0, 0]);
+  });
+});
+
+describe('four players', () => {
+  /** Run all sessions with scripted inputs; returns the longest wait (ticks without a new frame) per peer. */
+  function run(sessions: RollbackSession[], net: { advance(ms: number): void }, frames: number, skip: Set<number> = new Set()) {
+    const waits = sessions.map(() => 0), longest = sessions.map(() => 0);
+    for (let i = 0; i < frames; i++) {
+      sessions.forEach((s, k) => {
+        if (skip.has(k)) return;
+        const before = s.frame;
+        s.tick(scripted(k, s.frame, s.state));
+        waits[k] = s.frame === before ? waits[k] + 1 : 0;
+        longest[k] = Math.max(longest[k], waits[k]);
+      });
+      net.advance(1000 / 60);
+    }
+    return longest;
+  }
+  const drain = (sessions: RollbackSession[], net: { advance(ms: number): void }, skip: Set<number> = new Set()) => {
+    for (let i = 0; i < 90; i++) { sessions.forEach((s, k) => { if (!skip.has(k)) s.tick(emptyCommand()); }); net.advance(1000 / 60); }
+  };
+  const agree = (sessions: RollbackSession[]) => {
+    const [a, ...rest] = sessions;
+    let common = 0;
+    for (const [f, h] of a.hashes.local) if (rest.every((b) => b.hashes.local.get(f) === h)) common++;
+    for (const s of sessions) expect(s.stats.desyncFrame).toBeNull();
+    return common;
+  };
+
+  it('four peers over 40-90 ms links with loss stay in sync', () => {
+    const { net, sessions } = mesh(4, { latencyMs: 45, jitterMs: 15, loss: 0.05, random: lcg(9) });
+    net.setLink(0, 3, { latencyMs: 90, jitterMs: 20, loss: 0.05 });
+    run(sessions, net, 2400);
+    drain(sessions, net);
+    expect(agree(sessions)).toBeGreaterThan(5);
+    expect(sessions[0].state.players.length).toBe(4);
+    for (const s of sessions) expect(s.frame).toBeGreaterThan(2000);
+  });
+
+  it('a laggy player takes the extra input delay; the others stay low', () => {
+    const { net, sessions } = mesh(4, { latencyMs: 25, jitterMs: 5, random: lcg(4) });
+    for (const k of [0, 1, 2]) net.setLink(k, 3, { latencyMs: 130, jitterMs: 20 });
+    run(sessions, net, 1200);
+    expect(sessions[3].stats.inputDelay).toBeGreaterThanOrEqual(6);
+    for (const k of [0, 1, 2]) expect(sessions[k].stats.inputDelay).toBeLessThanOrEqual(4);
+    drain(sessions, net);
+    expect(agree(sessions)).toBeGreaterThan(3);
+  });
+
+  it('a player who disconnects is replaced by a bot; the rest keep playing in sync', () => {
+    const { net, sessions } = mesh(4, { latencyMs: 40, jitterMs: 10, random: lcg(2) }, { dropLaggers: true });
+    run(sessions, net, 600);
+    net.kill(2, 5000); // the tab dies; nobody gets a "left" notice for 5 s
+    const longest = run(sessions, net, 900, new Set([2]));
+    const alive = [sessions[0], sessions[1], sessions[3]];
+    for (const s of alive) expect(s.drops.map(([slot]) => slot)).toEqual([2]);
+    // Waiting is capped by the silence limit (2.5 s), not forever.
+    for (const k of [0, 1, 3]) expect(longest[k]).toBeLessThan(60 * 3);
+    drain(alive, net);
+    expect(agree(alive)).toBeGreaterThan(3);
+    expect(sessions[0].ownedSlots()).toContain(2); // the host plays the bot
+  });
+
+  it('a player whose inputs keep everyone waiting is dropped, and learns it', () => {
+    const { net, sessions } = mesh(4, { latencyMs: 30, jitterMs: 5, random: lcg(5) }, { dropLaggers: true, maxSelfDelay: 4 });
+    run(sessions, net, 300);
+    for (const k of [0, 1, 2]) net.setLink(k, 3, { latencyMs: 400, jitterMs: 150, loss: 0.3 });
+    run(sessions, net, 900);
+    expect(sessions[3].stats.droppedSelf).toBe(true);
+    const alive = sessions.slice(0, 3);
+    for (const s of alive) expect(s.drops.map(([slot]) => slot)).toEqual([3]);
+    drain(alive, net, new Set());
+    expect(agree(alive)).toBeGreaterThan(3);
   });
 });

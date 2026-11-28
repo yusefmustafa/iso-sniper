@@ -24,7 +24,7 @@ export const emptyCommand = (): Command => ({
 export type Stance = 'normal' | 'sprint' | 'roll' | 'kneel';
 
 export interface PlayerState {
-  id: number; // 0 or 1
+  id: number; // player slot, 0..3
   x: number;
   z: number;
   vx: number;
@@ -81,6 +81,7 @@ export type SimEvent =
   | { type: 'kneel'; player: number }
   | { type: 'roundStart'; round: number }
   | { type: 'countdown'; secondsLeft: number }
+  | { type: 'eliminated'; player: number; by: number; left: number } // left = players still standing
   | { type: 'roundWon'; player: number; score: number[] }
   | { type: 'matchWon'; player: number };
 
@@ -90,9 +91,13 @@ export interface MatchStats {
   hits: number[]; // shots that dealt damage
   charged: number[]; // empowered (kneel) hits
   longest: number[]; // longest hit, meters
+  kills: number[]; // players eliminated (free-for-all)
 }
 
-export const emptyStats = (): MatchStats => ({ shots: [0, 0], hits: [0, 0], charged: [0, 0], longest: [0, 0] });
+export const MAX_PLAYERS = 4;
+
+const zeros = (n: number) => Array.from({ length: n }, () => 0);
+export const emptyStats = (n = 2): MatchStats => ({ shots: zeros(n), hits: zeros(n), charged: zeros(n), longest: zeros(n), kills: zeros(n) });
 
 export interface GameState {
   tick: number;
@@ -100,7 +105,7 @@ export interface GameState {
   phase: Phase;
   phaseTicks: number; // ticks left in the current timed phase (fractional during slow motion)
   round: number;
-  score: number[];
+  score: number[]; // round wins, by player slot
   hitstop: number; // ticks the whole sim is frozen for impact
   slowmoTicks: number; // ticks of slow motion left (render reads this)
   players: PlayerState[];

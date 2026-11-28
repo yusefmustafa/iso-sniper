@@ -26,7 +26,7 @@ export interface AimSource {
 export class AimCursor {
   private canvas: HTMLCanvasElement;
   private g: CanvasRenderingContext2D;
-  private open: number[] = [1, 1]; // 1 = hip cone, 0 = crosshair (smoothed)
+  private open: number[] = [1, 1, 1, 1]; // 1 = hip cone, 0 = crosshair (smoothed)
   private dpr = 1;
 
   constructor(before: Element) {

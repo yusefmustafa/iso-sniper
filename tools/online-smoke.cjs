@@ -7,7 +7,7 @@
  *
  * Opens two isolated browser contexts, creates a match in one, opens the link
  * in the other, plays a few seconds of scripted input and checks that both
- * peers' state hashes agree. Pass `local` as the first argument to use
+ * peers' state hashes agree. For four players see tools/stress.cjs. Pass `local` as the first argument to use
  * BroadcastChannel between two tabs instead of WebRTC (no relay needed).
  */
 const { chromium } = require('playwright');
@@ -36,9 +36,10 @@ const base = process.env.URL || 'http://localhost:5173/';
   await shot(b, '3-name-taken');
   await b.fill('input.name', 'Blue Hawk');
   await b.click('button[data-id=rename]');
-  await a.waitForFunction(() => window.__iso.lobby.kind === 'room' && window.__iso.lobby.names[1] === 'Blue Hawk', null, { timeout: 30000 });
+  await a.waitForFunction(() => window.__iso.lobby.kind === 'room' && window.__iso.lobby.slots[1]?.name === 'Blue Hawk', null, { timeout: 30000 });
   if (await a.isEnabled('button[data-id=start]')) throw new Error('start enabled before the guest is ready');
   if (await a.$('button[data-id=ready]')) throw new Error('the host should have no Ready button');
+  await b.waitForSelector('button[data-id=ready]', { timeout: 30000 });
   await b.click('button[data-id=ready]');
   await a.waitForFunction(() => !document.querySelector('button[data-id=start]').disabled, null, { timeout: 10000 });
   await shot(a, '4-room-ready');
@@ -62,13 +63,13 @@ const base = process.env.URL || 'http://localhost:5173/';
   const common = ia.hashes.filter(([f]) => hb.has(f));
   const ok = ia.desync === null && ib.desync === null && common.length >= 3 && common.every(([f, h]) => hb.get(f) === h);
   await shot(a, '5-match');
-  // A third person opening the same link is turned away.
+  // A third person opening the same link mid-match is turned away.
   const c = await (net === 'local' ? ctxA : await browser.newContext(vp)).newPage();
   await c.goto(link);
   await c.fill('input.name', 'Third Wheel');
   await c.click('button[data-id=join]');
-  await c.waitForFunction(() => window.__iso.lobby.kind === 'menu' && /two players/.test(window.__iso.lobby.message || ''), null, { timeout: 30000 });
-  console.log('third player: lobby full');
+  await c.waitForFunction(() => window.__iso.lobby.kind === 'menu' && /already started/.test(window.__iso.lobby.message || ''), null, { timeout: 30000 });
+  console.log('third player: match already started');
   const stillOnline = (await mode(a)) === 'online' && (await mode(b)) === 'online';
   if (!stillOnline) throw new Error('the third player disturbed the match');
   console.log(ok ? `OK: ${common.length} matching state hashes` : 'FAIL: peers disagree');
