@@ -17,12 +17,12 @@ export type LobbyView =
 const CONTROLS: [string, string, string][] = [
   ['Move', 'WASD', 'Left stick'],
   ['Aim', 'Mouse', 'Right stick'],
-  ['Focus (red laser)', 'Hold right click', 'Hold LT'],
+  ['ADS', 'Hold right click', 'Hold LT'],
   ['Shoot', 'Left click', 'RT'],
   ['Sprint', 'Hold Shift', 'Hold LB'],
   ['Roll', 'Space', 'A'],
-  ['Rematch', 'Enter', 'Start'],
-  ['Menu', 'Esc', ''],
+  // Roll, keep holding roll, and ADS as you land: kneel and charge the 2-damage shot.
+  ['Empowered shot', 'Roll + hold Space + right click', 'Roll + hold A + LT'],
   ['Fullscreen', 'F', ''],
 ];
 
@@ -34,8 +34,7 @@ const controlsHtml = () => {
     ${CONTROLS.filter((r) => r[col]).map((r) => `<tr><td>${r[0]}</td><td><kbd>${r[col]}</kbd></td></tr>`).join('')}</table>`;
   return `<div class="controls-head"><h2>Controls</h2><div class="tabs" role="tablist">
       <button role="tab" data-scheme="kbm">Mouse &amp; keyboard</button><button role="tab" data-scheme="pad">Controller</button></div></div>
-    ${table('kbm', 1)}${table('pad', 2)}
-  <p class="tip">Focused shots go exactly down the laser. Roll into focus while still holding roll to kneel: you become a smaller target, and after ${config.kneelChargeTime}s your next shot deals ${config.chargedDamage} damage.</p>`;
+    ${table('kbm', 1)}${table('pad', 2)}`;
 };
 
 const SCHEME_KEY = 'snipefight:controls';
@@ -103,8 +102,8 @@ export class Hud {
     const linkBox = (link: string, copied: boolean) => `<div class="link"><input readonly value="${escapeHtml(link)}" />${btn('copy', copied ? 'Copied' : 'Copy', true)}</div>`;
     let body = '';
     if (view.kind === 'menu') {
-      body = `${nameBox(view.name, 'create', 'Create online match')}${btn('practice', 'Practice vs dummy')}
-        ${view.message ? `<p class="hint warn">${escapeHtml(view.message)}</p>` : '<p class="hint">Create a match and send the link to a friend.</p>'}`;
+      body = `${nameBox(view.name, 'create', 'Create online match')}${btn('practice', 'Practice')}
+        ${view.message ? `<p class="hint warn">${escapeHtml(view.message)}</p>` : ''}`;
     } else if (view.kind === 'invite') {
       body = `<p class="hint invite">You've been invited to a match.</p>${nameBox(view.name, 'join', 'Join match')}${btn('cancel', 'Back')}
         ${view.message ? `<p class="hint warn">${escapeHtml(view.message)}</p>` : ''}`;
