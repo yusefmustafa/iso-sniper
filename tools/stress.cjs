@@ -39,7 +39,8 @@ const url = `${base}?${q.toString().replace(/=(?=&|$)/g, '')}#${room}`;
   const browser = await chromium.launch({
     args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--autoplay-policy=no-user-gesture-required'],
   });
-  const size = { width: 960, height: 540 };
+  // Small, so software rendering and recording on a CI machine don't eat the CPU the game needs.
+  const size = { width: 640, height: 360 };
   const ctx = await browser.newContext({ viewport: size, recordVideo: { dir: out, size } });
   const videoStart = Date.now();
   const page = await ctx.newPage();
@@ -54,13 +55,16 @@ const url = `${base}?${q.toString().replace(/=(?=&|$)/g, '')}#${room}`;
     };
   }).catch(() => null);
   const samples = [];
+  const hashes = new Map(); // collected as we go: a dropped player's session is gone at the end
   let matchStart = 0;
+  let names = null;
   const deadline = Date.now() + (wait + 60) * 1000 + minutes * 60_000;
   while (Date.now() < deadline) {
     await page.waitForTimeout(5000);
     const s = await read();
     if (!s) continue;
-    if (s.mode === 'online' && !matchStart) { matchStart = Date.now(); console.log('match started with', s.names.join(', ')); }
+    if (s.mode === 'online' && !matchStart) { matchStart = Date.now(); names = s.names; console.log('match started with', s.names.join(', ')); }
+    for (const [f, h] of (await page.evaluate(() => [...(window.__iso.session?.hashes.local ?? new Map()).entries()]).catch(() => []))) hashes.set(f, h);
     if (s.net) {
       samples.push({ t: Math.round((Date.now() - matchStart) / 1000), ...s.net, score: s.score, round: s.round });
       const n = s.net;
@@ -69,9 +73,13 @@ const url = `${base}?${q.toString().replace(/=(?=&|$)/g, '')}#${room}`;
     if (matchStart && s.mode !== 'online') { console.log('match ended:', s.message); break; }
     if (matchStart && Date.now() - matchStart > minutes * 60_000) break;
   }
-  const hashes = await page.evaluate(() => [...(window.__iso.session?.hashes.local ?? new Map()).entries()]).catch(() => []);
+  for (const [f, h] of (await page.evaluate(() => [...(window.__iso.session?.hashes.local ?? new Map()).entries()]).catch(() => []))) hashes.set(f, h);
   const final = await read();
-  const stats = { name, host: !!host, url, videoStart, matchStart, names: final?.names, samples, hashes, final: final?.net ?? null };
+  const last = samples.at(-1) ?? null;
+  const stats = {
+    name, host: !!host, url, videoStart, matchStart, names: final?.net ? final.names : names, samples, hashes: [...hashes],
+    final: final?.net ?? last, endedEarly: !final?.net, endMessage: final?.net ? null : final?.message ?? null,
+  };
   fs.writeFileSync(path.join(out, 'stats.json'), JSON.stringify(stats, null, 1));
   const video = page.video();
   await ctx.close();

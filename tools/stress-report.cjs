@@ -12,26 +12,31 @@ const runs = fs.readdirSync(dir).map((d) => path.join(dir, d, 'stats.json')).fil
 runs.sort((a, b) => (a.final?.local ?? 9) - (b.final?.local ?? 9));
 const lines = ['# Free-for-all stress test', ''];
 if (!runs.length) { console.log('No results.'); process.exit(1); }
-const maps = runs.map((r) => new Map(r.hashes));
+// Every pair of machines must agree on every frame they both hashed (a dropped player stops hashing).
 let common = 0, bad = 0, firstBad = null;
-for (const [f, h] of maps[0]) {
-  if (!maps.every((m) => m.has(f))) continue;
-  common++;
-  if (!maps.every((m) => m.get(f) === h)) { bad++; firstBad ??= f; }
+for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length; j++) {
+  const a = new Map(runs[i].hashes), b = new Map(runs[j].hashes);
+  for (const [f, h] of a) {
+    if (!b.has(f)) continue;
+    common++;
+    if (b.get(f) !== h) { bad++; firstBad ??= f; }
+  }
 }
-lines.push(`**State check:** ${bad === 0 ? `all ${runs.length} machines agree on ${common} sampled frames (no desync)` : `${bad} of ${common} sampled frames differ, first at frame ${firstBad}`}.`, '');
-lines.push('| Player | Frames | Input delay | Rollbacks | Rollbacks/s (avg) | Deepest rollback seen | Ticks waited | Worst ping | Drops | Desync |');
-lines.push('|---|---|---|---|---|---|---|---|---|---|');
+lines.push(`**State check:** ${bad === 0 ? `every pair of machines agrees on all ${common} frame hashes they share (no desync)` : `${bad} of ${common} shared frame hashes differ, first at frame ${firstBad}`}.`, '');
+for (const r of runs) if (r.endedEarly) lines.push(`- ${r.name} left the match early: ${r.endMessage ?? 'no message'}`);
+if (runs.some((r) => r.endedEarly)) lines.push('');
+lines.push('| Player | Frames | Sim speed | Input delay | Rollbacks | Rollbacks/s (avg) | Deepest rollback seen | Ticks waited | Worst ping | Drops | Desync |');
+lines.push('|---|---|---|---|---|---|---|---|---|---|---|');
 for (const r of runs) {
   const f = r.final ?? {};
   const s = r.samples.filter((x) => x.t > 0);
   const secs = s.length ? s.at(-1).t : 0;
   const rtts = s.flatMap((x) => x.peers.map((p) => p.rttMs));
   const deepest = Math.max(0, ...s.map((x) => x.rollbackFrames));
-  lines.push(`| ${r.name} | ${f.frame ?? '–'} | ${[...new Set(s.map((x) => x.inputDelay))].join('→') || '–'} | ${f.rollbacks ?? '–'} | ${secs ? (f.rollbacks / secs).toFixed(1) : '–'} | ${deepest} f | ${f.stalls ?? '–'} (${f.frame ? ((100 * f.stalls) / (f.frame + f.stalls)).toFixed(1) : 0}%) | ${rtts.length ? Math.round(Math.max(...rtts)) : '–'} ms | ${f.drops ?? 0} | ${f.desyncFrame ?? 'none'} |`);
+  lines.push(`| ${r.name} | ${f.frame ?? '–'} | ${secs && f.frame ? `${Math.round((f.frame / secs / 60) * 100)}%` : '–'} | ${[...new Set(s.map((x) => x.inputDelay))].join('→') || '–'} | ${f.rollbacks ?? '–'} | ${secs ? (f.rollbacks / secs).toFixed(1) : '–'} | ${deepest} f | ${f.stalls ?? '–'} (${f.frame ? ((100 * f.stalls) / (f.frame + f.stalls)).toFixed(1) : 0}%) | ${rtts.length ? Math.round(Math.max(...rtts)) : '–'} ms | ${f.drops ?? 0} | ${f.desyncFrame ?? 'none'} |`);
 }
 lines.push('', '## Ping between players (ms, average over the match)', '');
-const slotNames = runs[0].names ?? runs.map((r) => r.name);
+const slotNames = runs.find((r) => r.names)?.names ?? runs.map((r) => r.name);
 lines.push(`| | ${slotNames.join(' | ')} |`, `|---|${slotNames.map(() => '---').join('|')}|`);
 for (const r of runs) {
   const owners = r.final?.owners ?? [];

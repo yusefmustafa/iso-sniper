@@ -397,13 +397,18 @@ function updateNetHud() {
 
 /** Run the fixed-tick sim up to `now`. Safe to call from more than one clock. */
 function advance(now: number): number {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  // Online, a slow frame (a weak GPU, a busy machine) must not slow the sim: the others would
+  // have to wait for us. Catch up on up to a quarter second of ticks per frame. Offline, a
+  // hitch just drops time.
+  const online = mode === 'online';
+  const dt = Math.min(online ? 0.25 : 0.1, (now - last) / 1000);
   last = now;
   const TICK = 1 / config.tickRate;
+  const maxSteps = online ? 15 : 5;
   acc += dt;
   let steps = 0;
-  while (acc >= TICK && steps < 5) { tick(); acc -= TICK; steps++; }
-  if (steps === 5) acc = 0;
+  while (acc >= TICK && steps < maxSteps) { tick(); acc -= TICK; steps++; }
+  if (steps === maxSteps) acc = 0;
   return dt;
 }
 
