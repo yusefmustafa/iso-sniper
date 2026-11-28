@@ -140,3 +140,7 @@ body.playing #game { cursor: none; }
 .results tr.who td { border-top: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
 .results tr.main td { font-size: 26px; }
 .results .hint { margin: 16px 0 0; color: var(--quiet); font-size: 13px; }
+
+/* A ?bot tab plays without drawing the game: just a status line. */
+body.bot #game, body.bot #hud, body.bot .settings-btn, body.bot .settings-panel, body.bot .lil-gui { display: none !important; }
+.bot-status { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; text-align: center; font: 15px/1.4 system-ui, sans-serif; color: #e8e8e8; background: #1b1d22; }

@@ -1,5 +1,6 @@
 import './style.css';
 import { config, type Config } from './config';
+import { BotBrain, type BotLevel } from './bot/brain';
 import { createTuningPanel } from './dev/tuning';
 import { KeyboardMouse } from './input/keyboardMouse';
 import { InputManager } from './input/manager';
@@ -39,11 +40,20 @@ const LOCAL_NET = params.get('net') === 'local';
 const FIXED_DELAY = params.has('delay') ? Number(params.get('delay')) : null;
 const RELAYS = params.get('relay')?.split(','); // override the public Nostr relays (testing)
 
+// `?bot` (or `?bot=easy|normal|hard`) turns this tab into a bot opponent: it joins the room in the
+// link, readies up and plays with scripted AI through the real netcode. It draws no 3D scene.
+const BOT = params.has('bot');
+const BOT_LEVELS: BotLevel[] = ['easy', 'normal', 'hard'];
+const levelOf = (v: string | null): BotLevel => (BOT_LEVELS.includes(v as BotLevel) ? (v as BotLevel) : settings.botLevel);
+let brain = new BotBrain(levelOf(params.get('bot')));
+
 type Mode = 'lobby' | 'practice' | 'online';
 let mode: Mode = 'lobby';
 const NAME_KEY = 'snipefight:name';
-let myName = (() => { try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; } })();
-const saveName = (n: string) => { myName = cleanName(n); try { localStorage.setItem(NAME_KEY, myName); } catch { /* not saved */ } };
+let myName = BOT ? 'Claude Bot' : (() => { try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; } })();
+// The bot shares the player's browser storage when it runs in a popup: never overwrite their name.
+const saveName = (n: string) => { myName = cleanName(n); if (BOT) return; try { localStorage.setItem(NAME_KEY, myName); } catch { /* not saved */ } };
+let practiceBot = false; // Practice vs bot instead of the dummy
 let lobby: LobbyView = { kind: 'menu', name: myName, on: onLobby };
 let room: MatchLobby | null = null;
 let roomId: string | null = null;
@@ -84,11 +94,18 @@ function onLobby(id: string, value?: string) {
       goOnline(r, true);
     } else {
       const r = roomFromHash();
-      if (r) goOnline(r, sessionStorage.getItem('snipefight:created') === r);
+      // A popup copies the opener's sessionStorage, so the bot would think it created the room.
+      if (r) goOnline(r, !BOT && sessionStorage.getItem('snipefight:created') === r);
     }
-  } else if (id === 'practice') {
+  } else if (id === 'practice' || id === 'practicebot') {
     if (value !== undefined && !nameError(value)) saveName(value);
-    startPractice();
+    startPractice(id === 'practicebot');
+  } else if (id === 'addbot' && roomId) {
+    // The bot runs in its own small window on this computer and joins like any opponent would.
+    const q = new URLSearchParams(location.search); // keeps ?relay= / ?net=local for testing
+    q.set('bot', settings.botLevel);
+    const url = `${location.origin}${location.pathname}?${q}#${roomId}`;
+    window.open(url, 'snipefight-bot', 'popup,width=380,height=240');
   } else if (id === 'copy' && (lobby.kind === 'waiting' || lobby.kind === 'room') && roomId) {
     void navigator.clipboard?.writeText(linkFor(roomId)).catch(() => {});
     lobby = { ...lobby, copied: true };
@@ -219,11 +236,13 @@ function startOnline(ch: Channel, localPlayer: number, seed: number) {
   handleEvents(state.events);
 }
 
-function startPractice() {
+function startPractice(vsBot = practiceBot) {
   leaveOnline();
-  state = createGame({ seed: (Math.random() * 2 ** 31) | 0, dummyP2: true });
+  practiceBot = vsBot;
+  brain = new BotBrain(settings.botLevel);
+  state = createGame({ seed: (Math.random() * 2 ** 31) | 0, dummyP2: !vsBot });
   prev = state.players.map((p) => ({ x: p.x, z: p.z }));
-  labels = ['YOU', 'DUMMY'];
+  labels = vsBot ? ['YOU', 'BOT'] : ['YOU', 'DUMMY'];
   names = ['Orange', 'Blue'];
   mode = 'practice';
   setPlaying(true);
@@ -232,6 +251,7 @@ function startPractice() {
 }
 
 function handleEvents(events: SimEvent[]) {
+  if (BOT) return; // the bot tab draws and plays nothing
   renderer.onEvents(events, state);
   sfx.play(events);
   for (const e of events) {
@@ -269,7 +289,7 @@ function onPause(id: string) {
 function tick() {
   if (mode === 'online' && session) {
     const me = session.state.players[session.local];
-    const cmd = input.command(me);
+    const cmd = BOT ? brain.think(session.state, session.local, config) : input.command(me);
     input.endTick();
     const before = session.state.players.map((p) => ({ x: p.x, z: p.z }));
     const frameBefore = session.frame;
@@ -291,7 +311,7 @@ function tick() {
     const cmd = input.command(state.players[0]);
     input.endTick();
     // Dev toggle: the dummy focuses straight ahead (along its spawn direction) and fires whenever its bolt is ready.
-    const dummyCmd = settings.dummyFires === 'on'
+    const dummyCmd = practiceBot ? brain.think(state, 1, config) : settings.dummyFires === 'on'
       ? { ...emptyCommand(), aimActive: true, aim: state.arena.spawns[1].aim, ads: true, fire: state.tick % 2 === 0 }
       : emptyCommand();
     step(state, [cmd, dummyCmd]);
@@ -324,7 +344,8 @@ function updateNetHud() {
   if (s.lastHeardMs > 10000) endOnline('Lost connection to your opponent.');
 }
 
-function frame(now: number) {
+/** Run the fixed-tick sim up to `now`. Safe to call from more than one clock. */
+function advance(now: number): number {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   const TICK = 1 / config.tickRate;
@@ -332,6 +353,13 @@ function frame(now: number) {
   let steps = 0;
   while (acc >= TICK && steps < 5) { tick(); acc -= TICK; steps++; }
   if (steps === 5) acc = 0;
+  return dt;
+}
+
+function frame(now: number) {
+  if (BOT) { botFrame(now); requestAnimationFrame(frame); return; }
+  const dt = advance(now);
+  const TICK = 1 / config.tickRate;
 
   if (mode === 'lobby') {
     hud.showLobby(lobby);
@@ -358,11 +386,54 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 
+// ---------------------------------------------------------------- bot tab
+
+let botStatusEl: HTMLElement | null = null;
+let botMenuSince = 0;
+let botRenames = 0;
+
+/** The bot clicks through the lobby by itself and shows a one-line status instead of the game. */
+function botFrame(now: number) {
+  advance(now);
+  if (mode === 'lobby') {
+    if (lobby.kind === 'invite') onLobby('join', myName);
+    else if (lobby.kind === 'room') {
+      if (lobby.nameTaken) onLobby('rename', `Claude Bot ${++botRenames + 1}`);
+      else if (!lobby.isHost && lobby.names[lobby.local] && !lobby.ready[lobby.local]) onLobby('ready');
+      else if (lobby.isHost && lobby.canStart) onLobby('start');
+    } else if (lobby.kind === 'menu') {
+      // The match is over (the host left). A bot window this game opened closes itself.
+      if (!botMenuSince) botMenuSince = now;
+      if (now - botMenuSince > 2000 && window.opener) window.close();
+    }
+    if (lobby.kind !== 'menu') botMenuSince = 0;
+  }
+  if (!botStatusEl) {
+    botStatusEl = document.createElement('div');
+    botStatusEl.className = 'bot-status';
+    document.body.append(botStatusEl);
+    document.body.classList.add('bot');
+  }
+  const text = mode === 'online'
+    ? `${names[session?.local ?? 1]} is playing ${names[1 - (session?.local ?? 1)]}. ${state.score[0]} - ${state.score[1]}, round ${state.round}. Keep this window open.`
+    : lobby.kind === 'menu' ? (lobby.message ?? 'Bot idle. Open a match link with ?bot to play.')
+      : lobby.kind === 'connecting' ? lobby.status : 'Bot in the lobby, readying up…';
+  if (botStatusEl.textContent !== text) botStatusEl.textContent = text;
+}
+
+if (BOT) {
+  // Hidden or minimized windows pause requestAnimationFrame. A worker's timer keeps the bot
+  // ticking so it doesn't freeze the match when its window is behind the game.
+  const src = 'setInterval(() => postMessage(0), 8);';
+  const ticker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  ticker.onmessage = () => { if (document.hidden) botFrame(performance.now()); };
+}
+
 // Opening a match link asks for a name first, then joins.
 const showInvite = () => { lobby = { kind: 'invite', name: myName, on: onLobby }; };
 if (roomFromHash()) {
   // The creator reloading their own tab goes straight back to waiting.
-  if (sessionStorage.getItem('snipefight:created') === roomFromHash() && !nameError(myName)) goOnline(roomFromHash()!, true);
+  if (!BOT && sessionStorage.getItem('snipefight:created') === roomFromHash() && !nameError(myName)) goOnline(roomFromHash()!, true);
   else showInvite();
 }
 window.addEventListener('hashchange', () => {
@@ -376,7 +447,7 @@ requestAnimationFrame(frame);
 
 // Handle for automated smoke tests and debugging in the console.
 (window as unknown as { __iso: unknown }).__iso = {
-  get state() { return state; }, get mode() { return mode; }, get session() { return session; }, get lobby() { return lobby; }, get room() { return room; }, config, renderer, settings,
+  bot: BOT, get state() { return state; }, get mode() { return mode; }, get session() { return session; }, get lobby() { return lobby; }, get room() { return room; }, config, renderer, settings,
   /** Replay a session's recorded inputs offline and hash the state at `frame` (desync debugging). */
   replayState(frame: number) {
     if (!session?.history) return null;

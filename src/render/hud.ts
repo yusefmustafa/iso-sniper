@@ -101,14 +101,15 @@ export class Hud {
     const linkBox = (link: string, copied: boolean) => `<div class="link"><input readonly value="${escapeHtml(link)}" />${btn('copy', copied ? 'Copied' : 'Copy', true)}</div>`;
     let body = '';
     if (view.kind === 'menu') {
-      body = `${nameBox(view.name, 'create', 'Create online match')}${btn('practice', 'Practice')}
+      body = `${nameBox(view.name, 'create', 'Create online match')}${btn('practice', 'Practice')}${btn('practicebot', 'Practice vs bot')}
         ${view.message ? `<p class="hint warn">${escapeHtml(view.message)}</p>` : ''}`;
     } else if (view.kind === 'invite') {
       body = `<p class="hint invite">You've been invited to a match.</p>${nameBox(view.name, 'join', 'Join match')}${btn('cancel', 'Back')}
         ${view.message ? `<p class="hint warn">${escapeHtml(view.message)}</p>` : ''}`;
     } else if (view.kind === 'waiting') {
       body = `${view.message ? `<p class="hint warn">${escapeHtml(view.message)}</p>` : ''}<p class="hint">Send this link to your opponent:</p>${linkBox(view.link, view.copied)}
-        <p class="status"><span class="wait">Waiting for your opponent to open the link…</span></p>${btn('cancel', 'Cancel')}`;
+        <p class="status"><span class="wait">Waiting for your opponent to open the link…</span></p>
+        ${btn('addbot', 'No one around? Add a bot')}${btn('cancel', 'Cancel')}`;
     } else if (view.kind === 'connecting') {
       body = `<p class="status"><span class="wait">${escapeHtml(view.status)}</span></p>${btn('cancel', 'Back')}`;
     } else {

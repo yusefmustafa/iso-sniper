@@ -77,6 +77,22 @@ Peer-to-peer rollback netcode, no game server:
 - **Limits:** no TURN relay yet, so a few strict networks (some corporate or mobile carriers) can't connect directly.
   P2P means no cheat protection; fine for playing with friends.
 
+## Playing a bot
+
+No one around? There are three ways to play the bot, all with the same scripted AI (`src/bot/brain.ts`).
+It plays through the normal input path, so online it goes through the real netcode like a human would.
+Difficulty (Easy / Normal / Hard) is in Settings.
+
+- **Practice vs bot:** offline, on the front screen.
+- **Online, on this computer:** create a match, then click **No one around? Add a bot**. A small window opens,
+  joins your link as "Claude Bot", readies up, and you click Start. Real WebRTC and Nostr signaling, but
+  near-zero ping since both ends are on one machine. Any tab opened with `?bot` (or `?bot=hard`) before the
+  `#room` is a bot.
+- **Online, from GitHub's servers (real ping):** create a match and copy the link, then on GitHub go to
+  **Actions → Summon a bot → Run workflow**, paste the link and run it. The bot joins in about a minute
+  (it has to install a browser first) and stays up to the minutes you chose, rejoining if you reload.
+  The same thing runs anywhere with `npm run bot -- "<link>" --level hard --minutes 20` (needs Playwright).
+
 ## Code layout
 
 ```
@@ -95,9 +111,10 @@ src/
     codec.ts         Command <-> small integers on the wire
   input/             devices -> Command (keyboard+mouse, gamepads)
   render/            Three.js scene, HUD, placeholder WebAudio sounds; reads state only
+  bot/brain.ts       scripted bot: reads the state, returns a Command each tick
   dev/tuning.ts      live tuning panel
 tests/               rules, determinism and rollback tests (80 ms latency, jitter, 10% loss)
-tools/               local Nostr relay and a two-browser WebRTC smoke test
+tools/               local Nostr relay, a two-browser WebRTC smoke test, and the headless bot runner (bot.cjs)
 ```
 
 The simulation never reads a device or a clock, which is what makes rollback possible.

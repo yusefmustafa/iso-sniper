@@ -18,11 +18,13 @@ export interface Settings {
   rollDirection: 'move' | 'cursor';
   /** Practice only: the dummy shoots straight ahead, to test getting hit. */
   dummyFires: 'off' | 'on';
+  /** How well the bot plays (Practice vs bot, and a bot added to an online room). */
+  botLevel: 'easy' | 'normal' | 'hard';
 }
 
 const KEY = 'snipefight:settings:v4'; // bumped when a default changes (v2 full cone, v3 low-ready sprint, v4 cut cone)
 const OLD_KEY = 'iso-sniper:settings:v4'; // key from before the rename, read so saved settings carry over
-const defaults: Settings = { coneLength: 'full', coneWalls: 'cut', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move', dummyFires: 'off' };
+const defaults: Settings = { coneLength: 'full', coneWalls: 'cut', sprintFacing: 'turn', sprintCarry: 'low', rollDirection: 'move', dummyFires: 'off', botLevel: 'normal' };
 
 function load(): Settings {
   try {
@@ -45,6 +47,11 @@ const choices: Choice<keyof Settings>[] = [
     key: 'coneLength', label: 'Hip-fire cone',
     hint: 'Hip shots can land anywhere inside the cone, all the way to the wall.',
     options: [{ value: 'full', label: 'Full range' }, { value: 'cursor', label: 'Stop at cursor' }],
+  },
+  {
+    key: 'botLevel', label: 'Bot difficulty',
+    hint: 'For Practice vs bot and for a bot you add to an online match.',
+    options: [{ value: 'easy', label: 'Easy' }, { value: 'normal', label: 'Normal' }, { value: 'hard', label: 'Hard' }],
   },
   {
     key: 'coneWalls', label: 'Cone behind cover', dev: true,
