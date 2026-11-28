@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { settings } from '../settings';
 import { rayToWorld } from '../sim/arena';
-import { chargeProgress, isCharged, secToTicks } from '../sim/sim';
+import { chargeProgress, gunUp, isCharged, secToTicks } from '../sim/sim';
 import type { Arena, GameState } from '../sim/types';
 import { AIM_HEIGHT, PLAYER_COLORS } from './scene';
 
@@ -92,7 +92,9 @@ export class AimCursor {
         toScreen(pos.x + Math.cos(ang) * dist, AIM_HEIGHT, pos.z + Math.sin(ang) * dist);
 
       const color = `#${PLAYER_COLORS[i].toString(16).padStart(6, '0')}`;
-      // Always full brightness (dimming made it hard to track); reloading shows as a ring instead.
+      // The cone dims while you can't fire (sprinting, rolling, reloading, countdown); the crosshair never dims.
+      const ready = gunUp(p) && p.boltTicks === 0 && state.phase !== 'countdown';
+      const coneAlpha = ready ? 1 : 0.35;
       const alpha = 1;
       const half = (config.hipSpreadDeg / 2) * DEG * open;
       const start = 0.7; // start the cone just past the muzzle
@@ -128,10 +130,10 @@ export class AimCursor {
 
         // Live part: where a hip shot can actually land.
         poly([a, ...hit, b]);
-        g.globalAlpha = (full ? 0.08 : 0.12) * alpha * open;
+        g.globalAlpha = (full ? 0.08 : 0.12) * coneAlpha * open;
         g.fillStyle = color;
         g.fill();
-        g.globalAlpha = 0.75 * alpha * Math.max(0.3, open);
+        g.globalAlpha = 0.75 * coneAlpha * Math.max(0.3, open);
         g.strokeStyle = color;
         g.lineWidth = 1.5;
         g.stroke();
@@ -158,16 +160,16 @@ export class AimCursor {
           };
           if (style === 'stop' || style === 'percent') {
             // A: grey continuation (the earlier look).
-            behind(); g.globalAlpha = 0.07 * alpha * open; g.fillStyle = '#9aa1ad'; g.fill();
-            g.globalAlpha = 0.35 * alpha * Math.max(0.3, open); sideLines('#9aa1ad', 1);
+            behind(); g.globalAlpha = 0.07 * coneAlpha * open; g.fillStyle = '#9aa1ad'; g.fill();
+            g.globalAlpha = 0.35 * coneAlpha * Math.max(0.3, open); sideLines('#9aa1ad', 1);
           } else if (style === 'hatch') {
             // B: red hatching behind cover, plus a red impact line on the cover face.
-            behind(); g.globalAlpha = 0.55 * alpha * open; g.fillStyle = this.hatch(); g.fill();
-            g.globalAlpha = 0.5 * alpha * Math.max(0.3, open); sideLines('#ff5a5a', 1);
-            g.globalAlpha = 0.95 * alpha * Math.max(0.3, open); impactLine('#ff4d4d', 3);
+            behind(); g.globalAlpha = 0.55 * coneAlpha * open; g.fillStyle = this.hatch(); g.fill();
+            g.globalAlpha = 0.5 * coneAlpha * Math.max(0.3, open); sideLines('#ff5a5a', 1);
+            g.globalAlpha = 0.95 * coneAlpha * Math.max(0.3, open); impactLine('#ff4d4d', 3);
           } else if (style === 'cut') {
             // C: nothing drawn behind cover; the blocked rays end in a hard white-red impact edge.
-            g.globalAlpha = alpha * Math.max(0.3, open); impactLine('#ffffff', 4);
+            g.globalAlpha = coneAlpha * Math.max(0.3, open); impactLine('#ffffff', 4);
             impactLine('#ff3b3b', 2);
           }
         }
@@ -177,7 +179,7 @@ export class AimCursor {
       if (style === 'percent' && clearPct !== null && open > 0.3) {
         const cp = at(p.aim, reach);
         const t = clearPct / 100;
-        g.globalAlpha = alpha * Math.min(1, (open - 0.3) / 0.4);
+        g.globalAlpha = coneAlpha * Math.min(1, (open - 0.3) / 0.4);
         g.font = '700 13px system-ui, sans-serif';
         g.textBaseline = 'middle';
         const txt = `${clearPct}% clear`;

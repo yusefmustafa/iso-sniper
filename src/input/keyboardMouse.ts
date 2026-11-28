@@ -14,6 +14,7 @@ export class KeyboardMouse implements InputDevice {
   private mouseY = 0;
   private hasMouse = false;
   private lastAim = 0;
+  private refocused = false; // the window lost focus since the last click
 
   constructor(private target: HTMLElement, private screenToWorld: ScreenToWorld) {
     window.addEventListener('keydown', (e) => {
@@ -28,11 +29,15 @@ export class KeyboardMouse implements InputDevice {
       if (e.code === 'Enter') this.startThisTick = true;
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.buttons.clear(); });
+    window.addEventListener('blur', () => { this.keys.clear(); this.buttons.clear(); this.refocused = true; });
     target.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      // A click that only re-captures the mouse (e.g. after alt-tabbing back) doesn't shoot or aim.
-      if (this.lockEnabled && !this.locked) { this.requestLock(); return; }
+      if (this.lockEnabled && !this.locked) {
+        this.requestLock();
+        // The click that re-captures the mouse after alt-tabbing back doesn't shoot or aim.
+        if (this.refocused) { this.refocused = false; return; }
+      }
+      this.refocused = false;
       this.buttons.add(e.button);
       this.pressedThisTick = true;
     });
