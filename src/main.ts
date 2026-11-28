@@ -347,6 +347,7 @@ function frame(now: number) {
   settingsUi.setAvailable(mode === 'lobby');
   // The roll direction setting is a game rule; online matches run on the host's copy of the config.
   if (mode !== 'online') config.rollTowardCursor = settings.rollDirection === 'cursor' ? 1 : 0;
+  hud.setControlScheme(input.active === kbm ? 'kbm' : 'pad');
   updateNetHud();
   requestAnimationFrame(frame);
 }
