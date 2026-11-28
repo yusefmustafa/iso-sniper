@@ -28,10 +28,11 @@ export class KeyboardMouse implements InputDevice {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => { this.keys.clear(); this.buttons.clear(); });
     target.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      // A click that only re-captures the mouse (e.g. after alt-tabbing back) doesn't shoot or aim.
+      if (this.lockEnabled && !this.locked) { this.requestLock(); return; }
       this.buttons.add(e.button);
       this.pressedThisTick = true;
-      e.preventDefault();
-      if (this.lockEnabled && !this.locked) this.requestLock();
     });
     window.addEventListener('mouseup', (e) => {
       this.buttons.delete(e.button);

@@ -246,9 +246,14 @@ function handleEvents(events: SimEvent[]) {
 // Esc frees the mouse (browser pointer lock) and opens the menu; Resume captures it again.
 const leaveMatch = () => (mode === 'online' ? endOnline('You left the match.') : toMenu());
 let wasLocked = false;
+// Alt-tab (or any focus loss) also drops pointer lock. That isn't the player pressing Esc,
+// so it shouldn't open the dimmed menu: they just click back in to keep playing.
+let blurAt = -1e9;
+window.addEventListener('blur', () => { blurAt = performance.now(); });
 document.addEventListener('pointerlockchange', () => {
+  const lostFocus = !document.hasFocus() || document.hidden || performance.now() - blurAt < 500;
   if (kbm.locked) menuOpen = false;
-  else if (wasLocked && mode !== 'lobby') menuOpen = true;
+  else if (wasLocked && mode !== 'lobby' && !lostFocus) menuOpen = true;
   wasLocked = kbm.locked;
 });
 window.addEventListener('keydown', (e) => {
