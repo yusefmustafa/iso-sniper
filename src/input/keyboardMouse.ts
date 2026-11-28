@@ -18,8 +18,10 @@ export class KeyboardMouse implements InputDevice {
   constructor(private target: HTMLElement, private screenToWorld: ScreenToWorld) {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      // Typing in a text box (your name, the tuning panel) is not game input.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (e.code === 'Backquote') { document.exitPointerLock?.(); return; } // dev panel toggle needs the cursor
-      if (e.code === 'KeyF') { this.toggleFullscreen(); return; }
       if (['Space', 'ShiftLeft', 'ShiftRight'].includes(e.code)) e.preventDefault();
       this.keys.add(e.code);
       this.pressedThisTick = true;
@@ -68,10 +70,6 @@ export class KeyboardMouse implements InputDevice {
     } catch { /* not allowed here; the window-wide contextmenu block still applies */ }
   }
 
-  private toggleFullscreen() {
-    if (document.fullscreenElement) void document.exitFullscreen?.();
-    else void document.documentElement.requestFullscreen?.().catch(() => {});
-  }
 
   poll(playerPos: { x: number; z: number }): Command {
     const c = emptyCommand();

@@ -23,7 +23,6 @@ const CONTROLS: [string, string, string][] = [
   ['Roll', 'Space', 'A'],
   // Roll, keep holding roll, and ADS as you land: kneel and charge the 2-damage shot.
   ['Empowered shot', 'Roll + hold Space + right click', 'Roll + hold A + LT'],
-  ['Fullscreen', 'F', ''],
 ];
 
 export type ControlScheme = 'kbm' | 'pad';

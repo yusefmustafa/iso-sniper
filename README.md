@@ -28,7 +28,6 @@ Live at https://snipefight.com. Pushing to `main` deploys it to GitHub Pages (`.
 | Sprint | Hold Shift | Hold LB / L1 (or click L3) |
 | Roll | Space | A / Cross |
 | Rematch | Enter | Start |
-| Fullscreen | F | |
 | Free the mouse (it is captured while you play); then click Leave match to quit | Esc | |
 | Tuning panel (practice only) | ` | |
 
