@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { settings } from '../settings';
 import { rayToWorld } from '../sim/arena';
-import { chargeProgress, gunUp, isCharged } from '../sim/sim';
+import { chargeProgress, isCharged, secToTicks } from '../sim/sim';
 import type { Arena, GameState } from '../sim/types';
 import { AIM_HEIGHT, PLAYER_COLORS } from './scene';
 
@@ -92,8 +92,8 @@ export class AimCursor {
         toScreen(pos.x + Math.cos(ang) * dist, AIM_HEIGHT, pos.z + Math.sin(ang) * dist);
 
       const color = `#${PLAYER_COLORS[i].toString(16).padStart(6, '0')}`;
-      const ready = gunUp(p) && p.boltTicks === 0 && state.phase !== 'countdown';
-      const alpha = ready ? 1 : 0.35;
+      // Always full brightness (dimming made it hard to track); reloading shows as a ring instead.
+      const alpha = 1;
       const half = (config.hipSpreadDeg / 2) * DEG * open;
       const start = 0.7; // start the cone just past the muzzle
       // Settings: end the cone at the cursor, or project it the whole way out to the arena edge.
@@ -215,6 +215,20 @@ export class AimCursor {
         g.globalAlpha = alpha;
         g.strokeStyle = isCharged(p) ? '#ffffff' : color;
         g.lineWidth = isCharged(p) ? 3 : 2;
+        g.beginPath(); g.arc(c.x, c.y, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); g.stroke();
+      }
+
+      // Reload (bolt cycle): a ring around the crosshair fills clockwise until the next round is chambered.
+      if (p.boltTicks > 0) {
+        const total = Math.max(1, secToTicks(config.boltTime));
+        const frac = 1 - p.boltTicks / total;
+        const r = 12;
+        g.globalAlpha = 0.9;
+        g.lineWidth = 4;
+        g.strokeStyle = 'rgba(10,12,16,0.75)';
+        g.beginPath(); g.arc(c.x, c.y, r, 0, Math.PI * 2); g.stroke();
+        g.lineWidth = 2.5;
+        g.strokeStyle = '#e8ebf0';
         g.beginPath(); g.arc(c.x, c.y, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); g.stroke();
       }
       g.globalAlpha = 1;
