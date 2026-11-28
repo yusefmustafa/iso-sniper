@@ -247,7 +247,7 @@ function handleEvents(events: SimEvent[]) {
 const leaveMatch = () => (mode === 'online' ? endOnline('You left the match.') : toMenu());
 let wasLocked = false;
 // Alt-tab (or any focus loss) also drops pointer lock. That isn't the player pressing Esc,
-// so it shouldn't open the dimmed menu: they just click back in to keep playing.
+// so it doesn't open the menu: they just click back in to keep playing.
 let blurAt = -1e9;
 window.addEventListener('blur', () => { blurAt = performance.now(); });
 document.addEventListener('pointerlockchange', () => {

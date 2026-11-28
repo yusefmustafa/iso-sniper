@@ -53,7 +53,7 @@ export class Hud {
   private net: HTMLElement;
   private pause: HTMLElement;
   private lobbyWrap: HTMLElement;
-  private pauseKey = '';
+  private pauseKey: string | null = null; // null = nothing rendered yet (a note of '' is a real value)
   private results: HTMLElement;
   private resultsKey = '';
   private lobbyKey = '';
@@ -187,7 +187,7 @@ export class Hud {
   /** The Esc menu: big and centered while the mouse is free during a match. */
   setPause(view: { note: string; on: (id: string) => void } | null) {
     this.pause.style.display = view ? 'flex' : 'none';
-    if (!view) { this.pauseKey = ''; return; }
+    if (!view) { this.pauseKey = null; return; }
     if (this.pauseKey === view.note) return;
     this.pauseKey = view.note;
     this.pause.innerHTML = `<div class="card"><h1>MENU</h1>${view.note ? `<p class="hint">${escapeHtml(view.note)}</p>` : ''}

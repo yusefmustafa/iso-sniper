@@ -117,11 +117,11 @@ body.playing #game { cursor: none; }
   padding: 32px 28px; text-align: center; }
 .pause h1 { margin: 0 0 8px; font-size: 40px; letter-spacing: 0.16em; }
 .pause .hint { color: var(--quiet); font-size: 13px; margin: 0 0 8px; }
-.pause button { display: block; width: 100%; margin: 12px 0 0; padding: 16px; border-radius: 12px; font: inherit; font-weight: 800; font-size: 17px;
+.pause .card button { display: block; width: 100%; margin: 12px 0 0; padding: 16px; border-radius: 12px; font: inherit; font-weight: 800; font-size: 17px;
   letter-spacing: 0.06em; color: var(--ink); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); cursor: pointer; }
-.pause button:hover { background: rgba(255,255,255,0.12); }
-.pause button.primary { background: #ff8a3d; border-color: #ff8a3d; color: #1a1209; }
-.pause button.primary:hover { background: #ffa15f; }
+.pause .card button:hover { background: rgba(255,255,255,0.12); }
+.pause .card button.primary { background: #ff8a3d; border-color: #ff8a3d; color: #1a1209; }
+.pause .card button.primary:hover { background: #ffa15f; }
 
 /* End-of-match results. */
 .results { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; pointer-events: none; z-index: 3; }
